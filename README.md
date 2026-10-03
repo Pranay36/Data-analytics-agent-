@@ -38,15 +38,32 @@ docker compose up -d
 This starts two Postgres servers — `appdb` on port 5432 (our own metadata, with pgvector) and
 `demo-analytics` on 5433 (the sample business data we query).
 
-**3. Install and run**
+**3. Install dependencies**
 
 ```bash
 cd backend
 uv sync
+```
+
+**4. Generate and load the demo dataset**
+
+```bash
+uv run python -m app.scripts.generate_demo_data   # synthetic ShopSphere data
+uv run python -m app.scripts.load_postgres        # load it, create a read-only role
+```
+
+This creates ~25k orders across 12 months with deliberately planted patterns — a
+June revenue drop concentrated in one region and category, a refund spike, and a
+share of orders that never complete. The true answers are written to
+`demo_data/generated/ground_truth.json`, which is what makes evaluation objective.
+
+**5. Run**
+
+```bash
 uv run uvicorn app.main:app --reload
 ```
 
-**4. Verify**
+**6. Verify**
 
 ```bash
 curl localhost:8000/health         # {"status":"ok"}

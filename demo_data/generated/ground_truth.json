@@ -1,0 +1,204 @@
+{
+  "_description": "True answers computed from the generated rows. Used by the evaluation suite so correctness is objective rather than a matter of opinion.",
+  "seed": 20260630,
+  "as_of_date": "2026-06-30",
+  "revenue_definition": "SUM(orders.total_amount) WHERE orders.status = 'SUCCESS'",
+  "row_counts": {
+    "customers": 2000,
+    "products": 54,
+    "orders": 24970,
+    "order_items": 48505,
+    "refunds": 1400
+  },
+  "order_status_distribution": {
+    "CANCELLED": {
+      "count": 679,
+      "pct": 2.72
+    },
+    "FAILED": {
+      "count": 844,
+      "pct": 3.38
+    },
+    "PENDING": {
+      "count": 364,
+      "pct": 1.46
+    },
+    "SUCCESS": {
+      "count": 23083,
+      "pct": 92.44
+    }
+  },
+  "revenue_by_month": {
+    "2025-07": 21663732.2,
+    "2025-08": 20197016.1,
+    "2025-09": 21346182.0,
+    "2025-10": 21367701.5,
+    "2025-11": 21395962.4,
+    "2025-12": 21110441.2,
+    "2026-01": 20705387.65,
+    "2026-02": 19853449.25,
+    "2026-03": 22249630.65,
+    "2026-04": 21181698.3,
+    "2026-05": 21665720.5,
+    "2026-06": 19191285.85
+  },
+  "pattern_1_june_revenue_drop": {
+    "may_revenue": 21665720.5,
+    "june_revenue": 19191285.85,
+    "pct_change": -11.42,
+    "by_region": {
+      "North": {
+        "may": 6615028.25,
+        "june": 6496449.65,
+        "pct_change": -1.79,
+        "share_of_total_change": 4.79
+      },
+      "South": {
+        "may": 5955692.85,
+        "june": 3856503.45,
+        "pct_change": -35.25,
+        "share_of_total_change": 84.84
+      },
+      "East": {
+        "may": 4981022.35,
+        "june": 4630380.7,
+        "pct_change": -7.04,
+        "share_of_total_change": 14.17
+      },
+      "West": {
+        "may": 4113977.05,
+        "june": 4207952.05,
+        "pct_change": 2.28,
+        "share_of_total_change": -3.8
+      }
+    },
+    "worst_region": "South",
+    "south_by_category": {
+      "Electronics": {
+        "may": 2994717.0,
+        "june": 1281835.0,
+        "pct_change": -57.2
+      },
+      "Fashion": {
+        "may": 1193222.0,
+        "june": 1011769.0,
+        "pct_change": -15.21
+      },
+      "Home & Kitchen": {
+        "may": 1217094.0,
+        "june": 981445.0,
+        "pct_change": -19.36
+      },
+      "Beauty": {
+        "may": 142161.0,
+        "june": 196768.0,
+        "pct_change": 38.41
+      },
+      "Books": {
+        "may": 63622.0,
+        "june": 57235.0,
+        "pct_change": -10.04
+      },
+      "Sports": {
+        "may": 433590.0,
+        "june": 378764.0,
+        "pct_change": -12.64
+      }
+    },
+    "worst_category_in_south": "Electronics",
+    "expected_drilldown_path": [
+      {
+        "dimension": "orders.shipping_region",
+        "segment": "South"
+      },
+      {
+        "dimension": "products.category",
+        "segment": "Electronics"
+      }
+    ]
+  },
+  "pattern_2_refund_spike": {
+    "category": "Home & Kitchen",
+    "product": "AeroBlend Pro Blender",
+    "refund_rate_pct_by_month": {
+      "2025-07": 1.93,
+      "2025-08": 3.15,
+      "2025-09": 1.98,
+      "2025-10": 1.46,
+      "2025-11": 3.28,
+      "2025-12": 3.01,
+      "2026-01": 3.36,
+      "2026-02": 2.95,
+      "2026-03": 4.03,
+      "2026-04": 3.93,
+      "2026-05": 7.88,
+      "2026-06": 15.67
+    },
+    "top_refunded_products": {
+      "AeroBlend Pro Blender": 59,
+      "Basil Spice Rack": 45,
+      "Terra Dining Mat": 42,
+      "Aurora Table Lamp": 39,
+      "Nook Storage Basket": 38
+    }
+  },
+  "pattern_3_incomplete_orders": {
+    "note": "Revenue must count SUCCESS only; ignoring status inflates it.",
+    "non_success_pct": 7.56,
+    "revenue_if_status_ignored": 272169980.1,
+    "correct_total_revenue": 251928207.6
+  },
+  "top_10_customers_by_revenue": [
+    {
+      "customer_id": 1249,
+      "name": "Yauvani Shere",
+      "revenue": 357662.85
+    },
+    {
+      "customer_id": 456,
+      "name": "Chakradhar Mohanty",
+      "revenue": 346346.0
+    },
+    {
+      "customer_id": 1184,
+      "name": "Januja Prakash",
+      "revenue": 345349.4
+    },
+    {
+      "customer_id": 886,
+      "name": "Dakshesh Rege",
+      "revenue": 325522.35
+    },
+    {
+      "customer_id": 1668,
+      "name": "Samuel Srinivasan",
+      "revenue": 319003.0
+    },
+    {
+      "customer_id": 756,
+      "name": "Urvi Prasad",
+      "revenue": 306670.75
+    },
+    {
+      "customer_id": 1025,
+      "name": "Zaitra Kohli",
+      "revenue": 305519.05
+    },
+    {
+      "customer_id": 1077,
+      "name": "Ijaya Viswanathan",
+      "revenue": 303176.0
+    },
+    {
+      "customer_id": 1409,
+      "name": "Patrick Baria",
+      "revenue": 299233.55
+    },
+    {
+      "customer_id": 975,
+      "name": "Rishi Seshadri",
+      "revenue": 287765.7
+    }
+  ],
+  "average_order_value": 10914.01
+}

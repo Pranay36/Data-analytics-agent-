@@ -15,7 +15,10 @@ backend/.env
 # Generated / cached artifacts
 backend/.llm_cache/
 data/
-demo_data/generated/
+demo_data/generated/*
+# ...but keep the ground-truth facts: small, and they document what the
+# dataset actually contains without needing to run the generator.
+!demo_data/generated/ground_truth.json
 reports/*.md
 *.duckdb
 
