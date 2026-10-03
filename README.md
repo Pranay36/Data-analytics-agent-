@@ -88,6 +88,16 @@ curl localhost:8000/api/v1/datasources
 
 ---
 
+## Asking a question
+
+```bash
+uv run python -m app.scripts.index_knowledge     # once: embed schema and definitions
+uv run python -m app.scripts.ask "What was total revenue in June 2026?"
+```
+
+Prints what retrieval supplied, every query the model attempted (including ones the
+SQL guard rejected), and the result.
+
 ## Choosing models
 
 Models and providers live in [`backend/models.yaml`](backend/models.yaml) — which

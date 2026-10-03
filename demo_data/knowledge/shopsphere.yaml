@@ -69,14 +69,20 @@ definitions:
     date_column: orders.order_date
 
   - name: Refund rate
-    synonyms: [return rate, refunds as a percentage]
-    meaning: Refunded value as a share of the value sold over the same period.
-    sql: SUM(refunds.amount) / SUM(order_items.line_amount) for the same period
-    tables: [refunds, order_items, orders]
-    date_column: refunds.refunded_at
+    synonyms: [return rate, refunds as a percentage, share of sales refunded]
+    meaning: Refunded value as a share of ALL the value sold in the same period.
+    sql: >-
+      SUM(refunds.amount) / SUM(order_items.line_amount), computed from order_items
+      of successful orders LEFT JOINed to refunds
+    tables: [refunds, order_items, orders, products]
+    date_column: orders.order_date
     notes: >-
-      Refunds are recorded per line item, so join refunds to order_items to reach
-      the product and its category.
+      The denominator must include every sold line item, refunded or not. Starting
+      from refunds and joining to order_items keeps only refunded items, so the
+      numerator and denominator become the same rows and the rate is always 100%.
+      Start from order_items (joined to successful orders) and LEFT JOIN refunds
+      ON refunds.order_item_id = order_items.id. Group by the month the item was
+      sold, using orders.order_date.
 
   - name: Active customer
     synonyms: [active buyers, engaged customers]
@@ -186,6 +192,24 @@ example_queries:
       WHERE r.refunded_at >= DATE '2026-05-01'
       GROUP BY p.name, p.category
       ORDER BY refunded_amount DESC
+
+  - question: What is the refund rate by product category and month?
+    tables: [orders, order_items, products, refunds]
+    notes: >-
+      Start from sold items and LEFT JOIN refunds. The denominator is everything
+      sold, so it must not be restricted to refunded rows.
+    sql: |
+      SELECT date_trunc('month', o.order_date) AS month,
+             p.category,
+             ROUND(100.0 * COALESCE(SUM(r.amount), 0)
+                   / NULLIF(SUM(oi.line_amount), 0), 2) AS refund_rate_pct
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.id
+      JOIN products p ON p.id = oi.product_id
+      LEFT JOIN refunds r ON r.order_item_id = oi.id
+      WHERE o.status = 'SUCCESS'
+      GROUP BY 1, 2
+      ORDER BY 1, 2
 
   - question: What is the payment success rate by payment method?
     tables: [payments]
