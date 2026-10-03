@@ -67,7 +67,11 @@ async def test_create_discovers_the_schema(session) -> None:
 
     assert source.status == "connected"
     tables = {t.table_name for t in await service.get_schema(session, source.id)}
-    assert tables == {"customers", "products", "orders", "order_items", "payments", "refunds"}
+    core = {"customers", "products", "orders", "order_items", "payments", "refunds"}
+    assert core <= tables
+    # The schema also carries deliberately confusable tables, so that retrieval
+    # quality can be measured rather than assumed.
+    assert "orders_legacy" in tables
 
 
 async def test_secret_is_stored_encrypted(session) -> None:

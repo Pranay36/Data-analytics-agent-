@@ -1,0 +1,210 @@
+# Business knowledge for the ShopSphere demo.
+#
+# This is the part a schema cannot tell you. Nothing in `orders` says that
+# revenue excludes cancelled orders, or that reporting uses the delivery region
+# rather than the customer's home region. Without these, a model writes SQL that
+# runs perfectly and returns the wrong number — the failure that is hardest to
+# notice.
+#
+# Definitions are retrieved by meaning, so synonyms matter: someone asking about
+# "GMV" or "turnover" must reach the Revenue definition.
+
+definitions:
+  - name: Revenue
+    synonyms: [sales, GMV, turnover, income, total sales, gross revenue]
+    meaning: Money from orders that completed successfully.
+    sql: SUM(orders.total_amount) WHERE orders.status = 'SUCCESS'
+    tables: [orders]
+    date_column: orders.order_date
+    notes: >-
+      Always filter on status = 'SUCCESS'. Roughly 8% of orders are FAILED,
+      CANCELLED or PENDING and must never be counted. Do not subtract refunds
+      unless the question asks for net revenue.
+
+  - name: Net revenue
+    synonyms: [revenue after refunds, net sales]
+    meaning: Revenue with refunded amounts subtracted.
+    sql: >-
+      SUM(orders.total_amount) WHERE orders.status = 'SUCCESS'
+      minus SUM(refunds.amount) over the same period
+    tables: [orders, refunds]
+    date_column: orders.order_date
+    notes: Use only when the question explicitly mentions net, or refunds being deducted.
+
+  - name: Revenue by product or category
+    synonyms: [category revenue, product revenue, sales by category]
+    meaning: Revenue broken down by what was bought, rather than by order.
+    sql: >-
+      SUM(order_items.line_amount) joined through orders
+      WHERE orders.status = 'SUCCESS'
+    tables: [order_items, orders, products]
+    date_column: orders.order_date
+    notes: >-
+      An order can contain several categories, so orders.total_amount cannot be
+      split by category. Use order_items.line_amount for any product, brand or
+      category breakdown.
+
+  - name: Region
+    synonyms: [area, zone, geography, location]
+    meaning: The region a sale is reported under.
+    sql: orders.shipping_region
+    tables: [orders]
+    notes: >-
+      Revenue reporting uses orders.shipping_region, the delivery region.
+      customers.region is the customer's home region and is not used for sales
+      reporting — the two disagree for a meaningful share of orders.
+
+  - name: Order count
+    synonyms: [number of orders, orders placed, how many orders]
+    meaning: How many orders completed successfully.
+    sql: COUNT(*) WHERE orders.status = 'SUCCESS'
+    tables: [orders]
+    date_column: orders.order_date
+
+  - name: Average order value
+    synonyms: [AOV, average basket, basket size, average spend]
+    meaning: Revenue divided by the number of successful orders.
+    sql: AVG(orders.total_amount) WHERE orders.status = 'SUCCESS'
+    tables: [orders]
+    date_column: orders.order_date
+
+  - name: Refund rate
+    synonyms: [return rate, refunds as a percentage]
+    meaning: Refunded value as a share of the value sold over the same period.
+    sql: SUM(refunds.amount) / SUM(order_items.line_amount) for the same period
+    tables: [refunds, order_items, orders]
+    date_column: refunds.refunded_at
+    notes: >-
+      Refunds are recorded per line item, so join refunds to order_items to reach
+      the product and its category.
+
+  - name: Active customer
+    synonyms: [active buyers, engaged customers]
+    meaning: A customer with at least one successful order in the last 30 days.
+    sql: >-
+      COUNT(DISTINCT orders.customer_id) WHERE orders.status = 'SUCCESS'
+      AND orders.order_date >= current date minus 30 days
+    tables: [orders]
+    date_column: orders.order_date
+    notes: Today is 2026-06-30 for this dataset, so the window is 2026-06-01 to 2026-06-30.
+
+  - name: Payment success rate
+    synonyms: [payment failures, checkout success, payment conversion]
+    meaning: Share of payment attempts that were captured.
+    sql: >-
+      COUNT(*) FILTER (WHERE payments.status = 'captured') / COUNT(*)
+      grouped by payments.method
+    tables: [payments, orders]
+    date_column: payments.paid_at
+
+  - name: Channel
+    synonyms: [platform, where orders come from, sales channel]
+    meaning: Where an order was placed — web, mobile_app or marketplace.
+    sql: orders.channel
+    tables: [orders]
+
+# Verified question-and-SQL pairs. Retrieved by matching the user's question
+# against these questions, then offered to the model as a pattern to adapt.
+example_queries:
+  - question: What was total revenue last month?
+    tables: [orders]
+    sql: |
+      SELECT SUM(total_amount) AS revenue
+      FROM orders
+      WHERE status = 'SUCCESS'
+        AND order_date >= DATE '2026-05-01'
+        AND order_date < DATE '2026-06-01'
+
+  - question: How did monthly revenue trend over the last year?
+    tables: [orders]
+    notes: Bucket by month and order chronologically.
+    sql: |
+      SELECT date_trunc('month', order_date) AS month,
+             SUM(total_amount) AS revenue
+      FROM orders
+      WHERE status = 'SUCCESS'
+        AND order_date >= DATE '2025-07-01'
+      GROUP BY 1
+      ORDER BY 1
+
+  - question: Compare revenue by region this month against last month
+    tables: [orders]
+    notes: >-
+      The comparison shape used for drill-down: one row per segment, with the
+      previous and current period side by side.
+    sql: |
+      SELECT shipping_region AS segment,
+             SUM(total_amount) FILTER (
+                 WHERE order_date >= DATE '2026-05-01'
+                   AND order_date < DATE '2026-06-01') AS previous_value,
+             SUM(total_amount) FILTER (
+                 WHERE order_date >= DATE '2026-06-01'
+                   AND order_date < DATE '2026-07-01') AS current_value
+      FROM orders
+      WHERE status = 'SUCCESS'
+        AND order_date >= DATE '2026-05-01'
+        AND order_date < DATE '2026-07-01'
+      GROUP BY shipping_region
+      ORDER BY current_value - previous_value
+
+  - question: Which product categories generated the most revenue?
+    tables: [orders, order_items, products]
+    notes: Category breakdowns use line_amount, not the order total.
+    sql: |
+      SELECT p.category,
+             SUM(oi.line_amount) AS revenue
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.id
+      JOIN products p ON p.id = oi.product_id
+      WHERE o.status = 'SUCCESS'
+      GROUP BY p.category
+      ORDER BY revenue DESC
+
+  - question: Who are our top 10 customers by revenue?
+    tables: [orders, customers]
+    sql: |
+      SELECT c.name,
+             SUM(o.total_amount) AS revenue
+      FROM orders o
+      JOIN customers c ON c.id = o.customer_id
+      WHERE o.status = 'SUCCESS'
+      GROUP BY c.name
+      ORDER BY revenue DESC
+      LIMIT 10
+
+  - question: Why did refunds increase, and which products are responsible?
+    tables: [refunds, order_items, products]
+    notes: Refunds reach a product through order_items.
+    sql: |
+      SELECT p.name AS product,
+             p.category,
+             COUNT(*) AS refund_count,
+             SUM(r.amount) AS refunded_amount
+      FROM refunds r
+      JOIN order_items oi ON oi.id = r.order_item_id
+      JOIN products p ON p.id = oi.product_id
+      WHERE r.refunded_at >= DATE '2026-05-01'
+      GROUP BY p.name, p.category
+      ORDER BY refunded_amount DESC
+
+  - question: What is the payment success rate by payment method?
+    tables: [payments]
+    sql: |
+      SELECT method,
+             COUNT(*) FILTER (WHERE status = 'captured') AS captured,
+             COUNT(*) AS attempts,
+             ROUND(100.0 * COUNT(*) FILTER (WHERE status = 'captured') / COUNT(*), 2) AS success_pct
+      FROM payments
+      GROUP BY method
+      ORDER BY success_pct
+
+  - question: How has the share of orders from each channel changed over time?
+    tables: [orders]
+    sql: |
+      SELECT date_trunc('month', order_date) AS month,
+             channel,
+             COUNT(*) AS orders
+      FROM orders
+      WHERE status = 'SUCCESS'
+      GROUP BY 1, 2
+      ORDER BY 1, 2

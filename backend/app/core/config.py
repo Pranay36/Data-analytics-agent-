@@ -93,6 +93,8 @@ class Settings(BaseSettings):
     embedding_provider: str = "openrouter"
     embedding_model: str = "liquid/lfm-2.5-embedding-350m:free"
     embedding_dim: int = 1024
+    embedding_cache_enabled: bool = True
+    embedding_cache_dir: Path = BACKEND_DIR / ".embedding_cache"
     """Must match `knowledge_chunks.embedding`. Vectors from different models are
     not comparable, so changing the model means re-embedding everything.
 
@@ -104,7 +106,20 @@ class Settings(BaseSettings):
     rag_top_k_tables: int = 5
     rag_top_k_definitions: int = 4
     rag_top_k_examples: int = 3
-    rag_min_similarity: float = 0.30
+    rag_min_similarity: float = 0.05
+    """Absolute floor, kept low on purpose: it is a sanity guard against a
+    completely unrelated match, not the main filter. Different embedding models
+    produce wildly different score ranges — the model in use scores a correct
+    table around 0.2 — so the real filtering is `rag_relative_cutoff`."""
+
+    rag_relative_cutoff: float = 0.55
+    """Keep tables scoring at least this fraction of the best match. Relative
+    because it adapts to whatever range a model produces, where an absolute
+    threshold has to be re-tuned for every model."""
+
+    rag_max_tables: int = 8
+    """Hard cap after expansion, so a well-connected schema cannot drag the whole
+    catalog into the prompt."""
     rag_hybrid_enabled: bool = False  # P1; the `search_tsv` column exists from day 1
 
     # ── SQL safety (see PROJECT_PLAN §14) ────────────────────────────────────
