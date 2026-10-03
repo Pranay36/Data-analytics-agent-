@@ -86,6 +86,25 @@ Stop the databases with `docker compose down`. Data survives; add `-v` to wipe i
 
 ---
 
+## Safety
+
+Generated SQL is parsed into a syntax tree and inspected before it reaches a database.
+Text-matching is not enough — all three of these read as harmless to a prefix check:
+
+```sql
+SELECT 1; DROP TABLE orders                              -- starts with SELECT
+WITH x AS (DELETE FROM orders RETURNING *) SELECT * FROM x   -- starts with WITH
+SELECT * FROM (SELECT id FROM orders LIMIT 5) t          -- "has a LIMIT"
+```
+
+The guard rejects the first as two statements, the second for containing a `DELETE`
+anywhere in the tree, and caps the third — whose inner limit leaves the outer query
+unbounded. It also blocks functions that escape the database (`pg_sleep`, `read_csv`,
+ClickHouse's `url` and `remote`), enforces a table allowlist, and rewrites the outer
+`LIMIT`.
+
+Behind it: a read-only database role, a server-side statement timeout, and a row cap.
+
 ## Stack
 
 Python 3.12 · FastAPI · LangGraph · PostgreSQL + pgvector · sqlglot · DuckDB · Next.js
