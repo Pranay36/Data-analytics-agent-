@@ -14,6 +14,7 @@ backend/.env
 
 # Generated / cached artifacts
 backend/.llm_cache/
+backend/.embedding_cache/
 data/
 demo_data/generated/*
 # ...but keep the ground-truth facts: small, and they document what the

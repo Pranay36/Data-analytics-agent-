@@ -114,6 +114,28 @@ total        revenue fell 11.4%
 Depth, model-call budget and token budget are all capped in code. The model proposes
 each next step and deterministic code decides whether to run it.
 
+## Evaluation
+
+A suite of questions with computed ground truth measures how often the system is right,
+rather than relying on spot checks:
+
+```bash
+uv run python -m app.evaluation                      # full run: live model calls
+uv run python -m app.evaluation --retrieval-only     # retrieval alone: free, seconds
+uv run python -m app.evaluation --category business_rule
+```
+
+Each case has a gold SQL query that is run against the live database, so "correct" is a
+computation, not an opinion. Results are compared on values, not column names, so
+`SUM(x) AS revenue` and `SUM(x) AS total` are the same answer. Beyond the final number it
+checks the SQL's syntax tree (was revenue filtered to successful orders? was the decoy
+archive table avoided?), the investigation path, correct refusals, that a destructive
+request changes nothing, and that every number in the written summary appears in the
+data. No model grades another model: every check is code.
+
+A report is written to `reports/` and each run is stored with the configuration that
+produced it.
+
 ## Choosing models
 
 Models and providers live in [`backend/models.yaml`](backend/models.yaml) — which
@@ -160,7 +182,7 @@ Free models are withdrawn without notice, so check what currently works:
 ```bash
 uv run python -m app.scripts.check_models           # one real question, end to end
 uv run python -m app.scripts.check_models --probe   # every model x strategy
-uv run python -m app.scripts.eval_retrieval         # retrieval quality, 21 questions
+uv run python -m app.evaluation --retrieval-only    # retrieval quality, no model calls
 ```
 
 LLM responses and embeddings are both cached on disk, so repeating a question costs
