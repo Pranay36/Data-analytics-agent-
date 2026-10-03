@@ -181,6 +181,16 @@ async def execute_sql(state: AnalysisState, deps: GraphDeps) -> AnalysisState:
     await save_query(deps, state.get("analysis_id"), query)
     update: AnalysisState = {"queries": [query], "last_error": None}
 
+    # If the model did not classify the question, the *result* can: a previous/current
+    # pair is a comparison whatever the model said. It does not supply a frame, so this
+    # does not make the question drillable by itself, but the label is no longer blank.
+    if (
+        state.get("mode", "primary") == "primary"
+        and state.get("question_type") is None
+        and profile.shape == "comparison"
+    ):
+        update["question_type"] = "comparison"
+
     # Zero rows is valid SQL but often means a wrong literal or date. Give the model
     # exactly one more try, with the likely causes, then accept the empty answer —
     # "no data for that period" is a legitimate result.

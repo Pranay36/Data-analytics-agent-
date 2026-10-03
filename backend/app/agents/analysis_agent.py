@@ -20,6 +20,34 @@ PROMPT = Path(__file__).parent / "prompts" / "analysis_agent.md"
 MAX_ROWS_SHOWN = 12
 
 
+UNEQUAL_PERIOD_TOLERANCE = 0.10
+
+
+def period_length_warning(frame: AnalysisFrame | None) -> str | None:
+    """A warning when the two compared periods are not the same length.
+
+    Found by evaluation: asked why refunds rose in May and June compared with earlier
+    months, the system compared four months of totals with two, concluded refunds had
+    *fallen* 12.6%, and told the user their premise was wrong. Every number it quoted
+    was real, so the groundedness check passed. Whether two periods are the same length
+    is arithmetic on dates the run already holds, so code states it rather than hoping
+    the model notices.
+    """
+    if frame is None or frame.current_period is None or frame.comparison_period is None:
+        return None
+    current = (frame.current_period.end - frame.current_period.start).days
+    previous = (frame.comparison_period.end - frame.comparison_period.start).days
+    if current <= 0 or previous <= 0:
+        return None
+    if abs(current - previous) / max(current, previous) <= UNEQUAL_PERIOD_TOLERANCE:
+        return None
+    return (
+        f"The periods compared differ in length: {frame.comparison_period.label} is "
+        f"{previous} days and {frame.current_period.label} is {current} days, so their "
+        "totals are not directly comparable."
+    )
+
+
 @dataclass
 class QuerySummary:
     """One executed query, reduced to what the analyst needs to read."""
@@ -78,6 +106,8 @@ def build_messages(request: AnalysisRequest) -> list[ChatMessage]:
                 f"{frame.comparison_period.label}."
             )
         parts.append(f"Metric: {frame.metric_name}.{periods}")
+        if warning := period_length_warning(frame):
+            parts.append(f"WARNING: {warning} Do not conclude a rise or fall from the raw totals.")
 
     for position, query in enumerate(request.queries):
         # Only the most recent result needs its raw rows. The statistics already carry

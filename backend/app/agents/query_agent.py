@@ -88,7 +88,11 @@ def build_messages(request: QueryRequest) -> list[ChatMessage]:
             "date ranges), so follow-up queries can reuse them unchanged. Then make this "
             "query the HEADLINE: a single row with columns `previous_value` and "
             "`current_value` — the metric over the earlier period and over the later one. "
-            "Do not break it down yet; later steps will."
+            "Do not break it down yet; later steps will.\n"
+            "If the two periods are different lengths (for example January to April "
+            "against May to June), their totals are NOT comparable. Compare a per-month "
+            "average instead, by dividing each total by the number of months in its "
+            "period, and say so in `explanation`."
         )
 
     if request.previous_sql is not None:

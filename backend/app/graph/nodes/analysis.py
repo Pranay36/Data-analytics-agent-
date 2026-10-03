@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import logging
 
-from app.agents.analysis_agent import AnalysisRequest, QuerySummary, run_analysis_agent
+from app.agents.analysis_agent import (
+    AnalysisRequest,
+    QuerySummary,
+    period_length_warning,
+    run_analysis_agent,
+)
 from app.agents.schemas import DrillDownRequest
 from app.analytics import ResultProfile
 from app.analytics.fallback_findings import fallback_findings
@@ -86,7 +91,13 @@ async def analysis_agent(state: AnalysisState, deps: GraphDeps) -> AnalysisState
 
     deps.llm_calls += result.llm_calls
     deps.tokens += result.usage.total
-    return {"analysis_rounds": [result.value]}
+
+    update: AnalysisState = {"analysis_rounds": [result.value]}
+    # Shown to the user whatever the model concluded, because a model can miss it.
+    warning = period_length_warning(state.get("frame"))
+    if warning and warning not in state.get("notes", []):
+        update["notes"] = [warning]
+    return update
 
 
 async def plan_drilldown(state: AnalysisState, deps: GraphDeps) -> AnalysisState:

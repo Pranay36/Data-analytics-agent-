@@ -373,3 +373,54 @@ async def test_a_fallback_summary_says_which_slice_it_describes(source) -> None:
         reply(sql=CATEGORY_SQL), ModelUnavailable("gone"),
     )
     assert "Within South" in result.state["analysis_rounds"][-1].summary
+
+
+# ── Defects found by the evaluation suite ────────────────────────────────────
+async def test_a_proposal_with_the_flag_off_still_drills(source) -> None:
+    """Seen in the evaluation: the model proposed the next step but set the flag false."""
+    contradictory = analysis(
+        summary="South dominates.", needs_drilldown=False,
+        drilldown={"dimension": "products.category", "focus_value": "South",
+                   "step_question": "How did revenue change by category within South?",
+                   "rationale": "South dominates."},
+    )
+    result, _ = await run(
+        source, headline(), by_region(),
+        reply(sql=REGION_SQL), contradictory, reply(sql=CATEGORY_SQL), analysis(),
+    )
+    assert result.state["drilldown_depth"] == 2
+
+
+async def test_unequal_periods_are_flagged_to_the_user_whatever_the_model_says(source) -> None:
+    """The model may not notice, so the warning is attached by code."""
+    unequal = {**FRAME,
+               "comparison_period": {"start": "2026-01-01", "end": "2026-05-01", "label": "Jan-Apr"},
+               "current_period": {"start": "2026-05-01", "end": "2026-07-01", "label": "May-Jun"}}
+    result, provider = await run(
+        source, reply(sql=HEADLINE_SQL, question_type="comparison", frame=unequal),
+        analysis(summary="Refunds fell."),
+    )
+    stored = await row(result.analysis_id)
+
+    assert any("differ in length" in c for c in stored.findings["caveats"])
+    assert "WARNING" in provider.requests[1].messages[-1].content, "the model is told too"
+
+
+async def test_a_missing_question_type_is_inferred_from_the_result_shape(source) -> None:
+    """A previous/current pair is a comparison whatever the model called it."""
+    unlabelled = reply(sql=HEADLINE_SQL, explanation="Revenue May vs June")
+    result, _ = await run(source, unlabelled, analysis())
+
+    assert result.state["question_type"] == "comparison"
+
+
+async def test_a_comparison_reply_without_periods_is_repaired_by_the_model(source) -> None:
+    """Rejected by the schema, so the existing repair step asks again with the reason."""
+    no_periods = reply(
+        sql=HEADLINE_SQL, question_type="root_cause",
+        frame={"metric_name": "Revenue", "metric_sql": "SUM(total_amount)", "base_table": "orders"},
+    )
+    result, provider = await run(source, no_periods, headline(), analysis())
+
+    assert result.state["frame"].current_period is not None
+    assert "frame is required" in provider.requests[1].messages[-1].content

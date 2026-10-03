@@ -88,6 +88,34 @@ class QueryAgentOutput(BaseModel):
             raise ValueError("cannot_answer_reason is required when can_answer is false")
         return self
 
+    @model_validator(mode="after")
+    def _a_frame_must_be_usable(self) -> QueryAgentOutput:
+        """Comparison questions need a frame with both periods, or they cannot be drilled.
+
+        Found by evaluation: on a "why did refunds increase" question the model returned
+        no question type and a frame with no periods. The investigation then correctly
+        refused to continue, since a follow-up cannot hold a comparison fixed without
+        both periods, and the question got a one-line answer where it needed three levels.
+        The fields are optional because most questions do not need them, which is exactly
+        why a weaker model skips them. Rejecting the reply sends it through the existing
+        repair step with a message that says what is missing.
+        """
+        has_periods = bool(
+            self.frame and self.frame.current_period and self.frame.comparison_period
+        )
+        comparable = self.question_type in ("comparison", "root_cause")
+
+        if self.can_answer and comparable and not has_periods:
+            raise ValueError(
+                "frame is required for comparison and root_cause questions, and must "
+                "include both current_period and comparison_period"
+            )
+        # A frame with no periods is of no use to anything. Discard it quietly for other
+        # question types rather than failing a question that never needed one.
+        if self.frame is not None and not has_periods:
+            self.frame = None
+        return self
+
 
 class Finding(BaseModel):
     statement: str = Field(
@@ -159,7 +187,16 @@ class AnalysisAgentOutput(BaseModel):
     caveats: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _drilldown_needs_a_request(self) -> AnalysisAgentOutput:
+    def _flag_and_proposal_agree(self) -> AnalysisAgentOutput:
         if self.needs_drilldown and self.drilldown is None:
             raise ValueError("drilldown is required when needs_drilldown is true")
+
+        # Found by evaluation: the model wrote a complete, valid proposal for the next
+        # step, with a rationale, and still set `needs_drilldown` to false, so a
+        # three-level investigation silently stopped at one. A concrete proposal is far
+        # stronger evidence of intent than a boolean, so it wins. Nothing is risked by
+        # this: the proposal still has to pass the deterministic guard, which refuses
+        # anything invalid, repeated or beyond the limits.
+        if self.drilldown is not None and not self.needs_drilldown:
+            self.needs_drilldown = True
         return self

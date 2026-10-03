@@ -46,6 +46,19 @@ When you do drill down:
 - Write `step_question` as a self-contained question including the period and the
   filters, such as "How did revenue change by category within South, May vs June 2026?"
 
+## Consistency
+
+`needs_drilldown` and `drilldown` must agree. If you provide a `drilldown`, set
+`needs_drilldown` to true. If you do not want to investigate further, set
+`needs_drilldown` to false AND leave `drilldown` empty.
+
+## Comparing periods of different length
+
+If the data tells you the two periods are different lengths, their totals are not
+comparable: four months of refunds will exceed two months even if refunds are rising.
+Do not conclude that something rose or fell from such totals. Say the periods differ,
+and only draw a conclusion from per-month or per-day averages if the data shows them.
+
 ## Output
 
 Reply by calling the provided tool with a single object.

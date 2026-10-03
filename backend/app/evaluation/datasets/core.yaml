@@ -246,8 +246,12 @@ cases:
   - id: segment_revenue
     category: breakdown
     question: Which customer segment generates the most revenue?
+    # First scored as rows_ordered over both segments, which marked a correct answer
+    # wrong: the question asks which segment is *highest*, and answering with just the
+    # top one (LIMIT 1) is right. The gold query was stricter than the question.
     expected_tables: [orders, customers]
-    compare: rows_ordered
+    compare: top_k
+    top_k: 1
     gold_sql: |
       SELECT c.segment, SUM(o.total_amount) FROM orders o JOIN customers c ON c.id = o.customer_id
       WHERE o.status = 'SUCCESS'

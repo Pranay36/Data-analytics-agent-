@@ -79,7 +79,11 @@ async def test_the_run_is_recorded(source) -> None:
 
 
 async def test_the_first_query_fixes_the_question_type_and_frame(source) -> None:
-    frame = {"metric_name": "Revenue", "metric_sql": "SUM(total_amount)", "base_table": "orders"}
+    frame = {
+        "metric_name": "Revenue", "metric_sql": "SUM(total_amount)", "base_table": "orders",
+        "current_period": {"start": "2026-06-01", "end": "2026-07-01", "label": "June"},
+        "comparison_period": {"start": "2026-05-01", "end": "2026-06-01", "label": "May"},
+    }
     result, _ = await run(
         source, "revenue in May",
         reply(sql=REVENUE_SQL, question_type="comparison", frame=frame),
