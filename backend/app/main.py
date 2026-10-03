@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import health
+from app.api.routes import datasources, health
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 
@@ -60,6 +60,7 @@ def create_app() -> FastAPI:
     # Health lives at the root (not under the API prefix) so orchestrator probes
     # are unaffected by API versioning.
     app.include_router(health.router)
+    app.include_router(datasources.router, prefix=API_PREFIX)
 
     return app
 

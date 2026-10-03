@@ -57,13 +57,23 @@ June revenue drop concentrated in one region and category, a refund spike, and a
 share of orders that never complete. The true answers are written to
 `demo_data/generated/ground_truth.json`, which is what makes evaluation objective.
 
-**5. Run**
+**5. Create the schema and register the demo sources**
+
+```bash
+uv run alembic upgrade head                 # create our own tables
+uv run python -m app.scripts.bootstrap      # register + sync the demo data sources
+```
+
+This needs `DATASOURCE_ENCRYPTION_KEY` set in `.env` (see step 1). Saved database passwords
+are encrypted with it, so keep it — a changed key makes stored credentials unreadable.
+
+**6. Run**
 
 ```bash
 uv run uvicorn app.main:app --reload
 ```
 
-**6. Verify**
+**7. Verify**
 
 ```bash
 curl localhost:8000/health         # {"status":"ok"}
@@ -71,6 +81,10 @@ curl localhost:8000/health/ready   # {"status":"ready","checks":{"database":"ok"
 ```
 
 API docs: `localhost:8000/docs`
+
+```bash
+curl localhost:8000/api/v1/datasources
+```
 
 ---
 

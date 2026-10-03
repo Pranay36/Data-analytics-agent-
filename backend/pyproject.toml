@@ -55,6 +55,8 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Migrations are generated; reformatting them only creates noisy diffs.
+extend-exclude = ["alembic/versions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
