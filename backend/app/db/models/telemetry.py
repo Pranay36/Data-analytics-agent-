@@ -31,6 +31,9 @@ class LlmCall(Base):
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tokens_estimated: Mapped[bool] = mapped_column(Boolean, default=False)
+    cached: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    """Served from the local response cache. The token counts are those of the
+    original call, so rollups of real spend must exclude these rows."""
 
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     success: Mapped[bool] = mapped_column(Boolean)

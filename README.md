@@ -88,6 +88,20 @@ curl localhost:8000/api/v1/datasources
 
 ---
 
+## LLM models
+
+The app runs on free-tier models behind its own provider interface. Defaults are two
+OpenRouter free models, then Groq; embeddings use OpenRouter's free embedding model.
+Free models are withdrawn without notice, so check what works today:
+
+```bash
+uv run python -m app.scripts.check_models           # one real question, end to end
+uv run python -m app.scripts.check_models --probe   # every model x strategy
+```
+
+Override the chain with `LLM_FALLBACK_CHAIN` in `.env` (`provider:model,provider:model`).
+Responses are cached on disk, so re-running the same question costs no quota.
+
 ## Development
 
 ```bash

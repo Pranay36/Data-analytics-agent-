@@ -35,6 +35,10 @@ def set_analysis_id(analysis_id: str | None) -> None:
     _analysis_id.set(analysis_id)
 
 
+def get_analysis_id() -> str | None:
+    return _analysis_id.get()
+
+
 @contextmanager
 def analysis_context(analysis_id: str):
     """Bind `analysis_id` to every log line emitted inside this block."""

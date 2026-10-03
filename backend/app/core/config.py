@@ -13,8 +13,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import SecretStr, field_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+DEFAULT_LLM_CHAIN = [
+    "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+    "openrouter:qwen/qwen3.8-27b:free",
+    "groq:openai/gpt-oss-120b",
+]
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 REPO_DIR = BACKEND_DIR.parent
@@ -52,11 +58,7 @@ class Settings(BaseSettings):
     """Fernet key for datasource passwords. Required outside `local`."""
 
     # ── LLM providers (see PROJECT_PLAN §17.6) ───────────────────────────────
-    llm_fallback_chain: Annotated[list[str], NoDecode] = [
-        "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
-        "openrouter:qwen/qwen3.8-27b:free",
-        "groq:openai/gpt-oss-120b",
-    ]
+    llm_fallback_chain: Annotated[list[str], NoDecode] = list(DEFAULT_LLM_CHAIN)
     """Ordered `provider:model` entries, tried in sequence. The default is the set
     verified to return correct, guard-approved SQL in both structured-output modes.
     Free-tier availability changes often, so override via LLM_FALLBACK_CHAIN.
@@ -125,6 +127,17 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return [item.strip() for item in v.split(",") if item.strip()]
         return v
+
+    @model_validator(mode="after")
+    def _empty_chain_means_default(self) -> Settings:
+        """A blank `LLM_FALLBACK_CHAIN=` line should mean "use the default".
+
+        `.env.example` ships the variable empty, and without this an empty value
+        silently replaces the default with no models at all.
+        """
+        if not self.llm_fallback_chain:
+            self.llm_fallback_chain = list(DEFAULT_LLM_CHAIN)
+        return self
 
     @property
     def is_local(self) -> bool:
