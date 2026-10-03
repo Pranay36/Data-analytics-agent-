@@ -96,7 +96,23 @@ uv run python -m app.scripts.ask "What was total revenue in June 2026?"
 ```
 
 Prints what retrieval supplied, every query the model attempted (including ones the
-SQL guard rejected), and the result.
+SQL guard rejected), the analysis at each level, and the result.
+
+For a "why" question it investigates on its own:
+
+```bash
+uv run python -m app.scripts.ask "Why did revenue fall in June 2026 compared with May?"
+```
+
+```
+total        revenue fell 11.4%
+  → region   South fell 35.2% and accounts for 85% of the drop
+  → category within South: Electronics fell 57.2%, 80% of South's change
+  → channel  within Electronics: no single channel dominates
+```
+
+Depth, model-call budget and token budget are all capped in code. The model proposes
+each next step and deterministic code decides whether to run it.
 
 ## Choosing models
 

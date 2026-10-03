@@ -66,9 +66,14 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
-# A server asking us to wait longer than this is not worth waiting for on a
-# request someone is watching; the next model in the chain is the better move.
-MAX_RETRY_WAIT_SECONDS = 15.0
+# A server asking us to wait longer than this is not worth waiting for on a request
+# someone is watching, so the next model in the chain is tried instead. Set by
+# `llm_max_retry_wait_seconds`; this is only the default.
+#
+# It was 15s and that was too short. Groq's per-minute token limit asks for waits of
+# around 20s, and giving up on it sent the run to free models that returned invalid
+# structured output six times over 100 seconds. Waiting for the good model is faster.
+MAX_RETRY_WAIT_SECONDS = 45.0
 DEFAULT_BACKOFF_SECONDS = 2.0
 
 # After a model fails for a reason retrying cannot fix, skip it for a while rather
@@ -108,6 +113,7 @@ class LLMClient:
         timeout_seconds: float = 60.0,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         clock: Callable[[], float] = time.monotonic,
+        max_retry_wait_seconds: float = MAX_RETRY_WAIT_SECONDS,
     ) -> None:
         if not chain:
             raise ValueError("The LLM fallback chain is empty. Set LLM_FALLBACK_CHAIN.")
@@ -119,6 +125,7 @@ class LLMClient:
         self._max_retries = max_retries
         self._timeout = timeout_seconds
         self._sleep = sleep
+        self._max_retry_wait = max_retry_wait_seconds
         self._clock = clock
         self._cooling_until: dict[str, float] = {}
         # Free tiers have low per-minute limits; cap in-flight calls.
@@ -149,6 +156,7 @@ class LLMClient:
             max_retries=settings.llm_max_retries,
             max_concurrency=settings.llm_max_concurrency,
             timeout_seconds=settings.llm_timeout_seconds,
+            max_retry_wait_seconds=settings.llm_max_retry_wait_seconds,
         )
 
     # ── Public API ───────────────────────────────────────────────────────────
@@ -228,7 +236,9 @@ class LLMClient:
         gone = isinstance(exc, ModelUnavailable | ProviderAuthError)
         seconds = COOLDOWN_GONE_SECONDS if gone else COOLDOWN_BUSY_SECONDS
         if isinstance(exc, RateLimited) and exc.retry_after is not None:
-            seconds = max(seconds, exc.retry_after)
+            # The provider said when it will accept requests again. Use that exactly:
+            # a flat minute blocked the best model for three times as long as needed.
+            seconds = exc.retry_after + 1
         self._cooling_until[entry.key] = self._clock() + seconds
 
     async def _run(
@@ -296,7 +306,7 @@ class LLMClient:
                 if not isinstance(exc, TRANSIENT) or retry == self._max_retries:
                     raise
                 wait = _wait_seconds(exc, retry)
-                if wait > MAX_RETRY_WAIT_SECONDS:
+                if wait > self._max_retry_wait:
                     raise
                 logger.info("retrying", extra={"model": ctx.entry.key, "wait": wait,
                                                "reason": type(exc).__name__})

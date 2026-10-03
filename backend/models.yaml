@@ -48,7 +48,12 @@ llm:
   # model to `query`, where SQL correctness is decided.
   agents:
     query: null
-    analysis: null
+    # The analyst interprets statistics that were already computed, so it does not need
+    # the strongest model, and it runs once per drill-down level alongside the Query
+    # Agent. Sharing one Groq model (8,000 tokens a minute) meant a full investigation
+    # took nearly four minutes of rate-limit waiting. Gemini has its own quota.
+    # `-latest` aliases are used because dated Gemini models are withdrawn without notice.
+    analysis: gemini:gemini-flash-lite-latest
     visualization: null
 
   # How to ask each model for machine-readable output, in order of preference.
@@ -61,6 +66,10 @@ llm:
     models:
       "groq:openai/gpt-oss-120b": [tool_call, json_schema, prompt_json]
       "groq:openai/gpt-oss-20b": [tool_call, json_schema, prompt_json]
+      # Tool calling answered 3 of 3 probes in about 1.5s. Its sibling gemini-flash-latest
+      # returned HTTP 503 "high demand" on 2 of 3, so avoid that alias.
+      "gemini:gemini-flash-lite-latest": [tool_call, prompt_json]
+      "gemini:gemini-3.5-flash-lite": [tool_call, prompt_json]
       "openrouter:nvidia/nemotron-3-super-120b-a12b:free": [tool_call, json_schema, prompt_json]
       "openrouter:qwen/qwen3.8-27b:free": [tool_call, json_schema, prompt_json]
 

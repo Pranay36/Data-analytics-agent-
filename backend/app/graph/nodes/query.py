@@ -33,6 +33,8 @@ async def query_agent(state: AnalysisState, deps: GraphDeps) -> AnalysisState:
         previous_sql=previous.sql if repairing and previous else None,
         previous_error=state.get("last_error") if repairing else None,
         frame=state.get("frame") if state["mode"] == "drilldown" else None,
+        drill=state.get("drill") if state["mode"] == "drilldown" else None,
+        filters=list(state.get("filter_path", [])),
     )
 
     try:

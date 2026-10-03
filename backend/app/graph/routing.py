@@ -13,7 +13,7 @@ from app.graph.state import AnalysisState
 
 QueryNext = Literal["validate_sql", "finalize"]
 ValidateNext = Literal["execute_sql", "query_agent", "finalize"]
-ExecuteNext = Literal["finalize", "query_agent"]
+ExecuteNext = Literal["analysis_agent", "query_agent", "finalize"]
 
 
 def after_load(state: AnalysisState) -> Literal["retrieve_context", "finalize"]:
@@ -49,4 +49,22 @@ def after_execute(state: AnalysisState, *, max_attempts: int) -> ExecuteNext:
         return "finalize"
     if state.get("last_error") and state["attempt"] <= max_attempts:
         return "query_agent"
+    # Only a query that ran is analysed. If every attempt failed there is nothing
+    # to interpret, and finalize reports the failure.
+    last = state["queries"][-1] if state.get("queries") else None
+    return "analysis_agent" if last is not None and last.status == "succeeded" else "finalize"
+
+
+def after_analysis(state: AnalysisState) -> Literal["plan_drilldown", "finalize"]:
+    """Proposals go to the planner; anything else ends the run."""
+    rounds = state.get("analysis_rounds") or []
+    if rounds and rounds[-1].needs_drilldown and rounds[-1].drilldown is not None:
+        return "plan_drilldown"
     return "finalize"
+
+
+def after_plan(state: AnalysisState) -> Literal["retrieve_context", "finalize"]:
+    """A refused proposal ends the investigation; an approved one starts the next step."""
+    if state.get("stop_reason") or state.get("drill") is None:
+        return "finalize"
+    return "retrieve_context"

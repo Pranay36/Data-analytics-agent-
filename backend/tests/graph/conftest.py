@@ -75,3 +75,10 @@ REVENUE_SQL = (
     "SELECT SUM(total_amount) AS revenue FROM orders WHERE status = 'SUCCESS' "
     "AND order_date >= DATE '2026-05-01' AND order_date < DATE '2026-06-01'"
 )
+
+
+def analysis(**fields) -> str:
+    """A scripted Analysis Agent reply. By default: summarise, do not drill down."""
+    base = {"summary": "Revenue was as expected.", "findings": [], "needs_drilldown": False,
+            "confidence": "high", "caveats": []}
+    return json.dumps({**base, **fields})

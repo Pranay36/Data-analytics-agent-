@@ -9,9 +9,11 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from app.analytics import ResultProfile, profile_result
 from app.connectors import ConnectionFailed, ConnectorError
 from app.graph.deps import GraphDeps
 from app.graph.persistence import save_query, set_stage
+from app.graph.reconcile import reconcile
 from app.graph.state import AnalysisState, ExecutedQuery, RunError
 from app.sql_guard import validate_sql
 
@@ -35,6 +37,14 @@ def is_empty_result(rows: list[list]) -> bool:
     if not rows:
         return True
     return all(all(value is None for value in row) for row in rows)
+
+
+def _parent_profile(state: AnalysisState) -> ResultProfile | None:
+    """The profile of the most recent successful query: what this step breaks down."""
+    for earlier in reversed(state.get("queries", [])):
+        if earlier.status == "succeeded" and earlier.profile:
+            return ResultProfile.model_validate(earlier.profile)
+    return None
 
 
 def _purpose(state: AnalysisState) -> str:
@@ -128,6 +138,13 @@ async def execute_sql(state: AnalysisState, deps: GraphDeps) -> AnalysisState:
             "attempt": state["attempt"] + 1,
         }
 
+    # Statistics are computed here, deterministically, so the Analysis Agent is handed
+    # facts to interpret rather than sums to perform.
+    profile = profile_result(
+        result.column_names, result.rows,
+        materiality_pct=deps.settings.drilldown_materiality_pct,
+    )
+    drill = state.get("drill")
     query = ExecutedQuery(
         **base,  # type: ignore[arg-type]
         status="succeeded",
@@ -136,9 +153,32 @@ async def execute_sql(state: AnalysisState, deps: GraphDeps) -> AnalysisState:
         row_count=result.row_count,
         truncated=result.truncated,
         execution_ms=result.execution_ms,
+        profile=profile.model_dump(mode="json"),
+        filters=list(state.get("filter_path", [])),
+        dimension=drill.dimension if drill is not None else None,
     )
-    await save_query(deps, state.get("analysis_id"), query)
+    # A drill-down must add back up to the segment it came from. If it does not, the
+    # SQL is wrong in a way no syntax check can see, so it is treated as a failed
+    # attempt and the model is told exactly how the numbers disagree.
+    if drill is not None and not is_empty_result(result.rows):
+        parent = _parent_profile(state)
+        if parent is not None:
+            focus = drill.focus_filter if drill.focus_filter else {}
+            check = reconcile(
+                profile, parent, focus,
+                tolerance_pct=deps.settings.drilldown_reconcile_tolerance_pct,
+            )
+            if not check.ok:
+                failed = query.model_copy(update={"status": "failed", "error": check.message})
+                await save_query(deps, state.get("analysis_id"), failed)
+                logger.info("breakdown did not reconcile", extra={"detail": check.message})
+                return {
+                    "queries": [failed],
+                    "last_error": check.message,
+                    "attempt": state["attempt"] + 1,
+                }
 
+    await save_query(deps, state.get("analysis_id"), query)
     update: AnalysisState = {"queries": [query], "last_error": None}
 
     # Zero rows is valid SQL but often means a wrong literal or date. Give the model

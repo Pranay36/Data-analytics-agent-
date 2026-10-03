@@ -64,6 +64,8 @@ async def save_query(deps: GraphDeps, analysis_id: str | None, query: ExecutedQu
                     execution_ms=query.execution_ms,
                     result_columns=query.columns or None,
                     result_preview=query.rows or None,
+                    filters=query.filters or None,
+                    profile=query.profile,
                 )
             )
             await session.commit()

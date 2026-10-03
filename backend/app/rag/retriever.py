@@ -129,6 +129,27 @@ async def _search(
     ]
 
 
+async def _fetch_table(
+    session: AsyncSession, data_source_id: uuid.UUID, bare_name: str
+) -> RetrievedChunk | None:
+    """Look a table chunk up by name, bypassing similarity ranking."""
+    rows = (
+        await session.scalars(
+            select(KnowledgeChunk).where(
+                KnowledgeChunk.data_source_id == data_source_id,
+                KnowledgeChunk.kind == "table",
+            )
+        )
+    ).all()
+    for chunk in rows:
+        if _bare(chunk.title) == bare_name:
+            return RetrievedChunk(
+                kind=chunk.kind, title=chunk.title, content=chunk.content,
+                payload=chunk.payload or {}, score=0.0, reason="required",
+            )
+    return None
+
+
 def _above_cutoff(
     chunks: list[RetrievedChunk], *, limit: int, min_similarity: float, relative_cutoff: float
 ) -> list[RetrievedChunk]:
@@ -178,8 +199,16 @@ async def retrieve(
     min_similarity: float = 0.05,
     relative_cutoff: float = 0.55,
     max_tables: int = 8,
+    must_include: list[str] | None = None,
 ) -> RetrievedContext:
-    """Gather the tables, definitions, examples and joins a question needs."""
+    """Gather the tables, definitions, examples and joins a question needs.
+
+    Args:
+        must_include: tables that have to be present regardless of ranking. A
+            drill-down by `products.category` needs `products` and a join path to
+            it; whether the follow-up question's wording happens to surface that
+            table is not something to leave to chance.
+    """
     vector = await provider.embed_query(question)
 
     # Over-fetch, then filter: the cutoff should remove weak matches, not limit
@@ -212,6 +241,13 @@ async def retrieve(
         if candidate is not None and candidate.title not in selected:
             selected[candidate.title] = candidate.model_copy(update={"reason": reason})
 
+    for name in must_include or []:
+        if _bare(name) not in by_bare_name:
+            fetched = await _fetch_table(session, data_source_id, _bare(name))
+            if fetched is not None:
+                by_bare_name[_bare(name)] = fetched
+        pull_in(name, "required")
+
     # Step 2: tables named by the definitions and examples we retrieved. High
     # precision, because a definition states which tables it is computed from.
     for chunk in [*definitions, *examples]:
@@ -231,7 +267,11 @@ async def retrieve(
     ):
         pull_in(name, "join_bridge")
 
-    ordered = sorted(selected.values(), key=lambda chunk: -chunk.score)[:max_tables]
+    # Required tables sort ahead of the score order so the cap cannot drop them.
+    ordered = sorted(
+        selected.values(), key=lambda chunk: (chunk.reason != "required", -chunk.score)
+    )[:max_tables]
+    ordered.sort(key=lambda chunk: -chunk.score)
 
     # Joins between the tables we ended up with, so the model is not left to
     # guess which columns pair up.

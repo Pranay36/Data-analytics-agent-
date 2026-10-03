@@ -16,12 +16,20 @@ from typing import Annotated, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
-from app.agents.schemas import AnalysisFrame, QueryAgentOutput
+from app.agents.schemas import (
+    AnalysisAgentOutput,
+    AnalysisFrame,
+    DrillDownRequest,
+    QueryAgentOutput,
+)
+from app.graph.drilldown import DimensionInfo
 from app.rag import RetrievedContext
 from app.sql_guard import ValidationResult
 
 StopReason = Literal[
     "answered",
+    "max_depth",
+    "inconclusive",
     "cannot_answer",
     "invalid_sql",
     "query_failed",
@@ -65,6 +73,11 @@ class ExecutedQuery(BaseModel):
     truncated: bool = False
     execution_ms: int | None = None
     explanation: str = ""
+    filters: list[dict[str, str]] = Field(default_factory=list)
+    """Segments this query was restricted to, accumulated down the drill-down path."""
+    dimension: str | None = None
+    profile: dict | None = None
+    """Deterministic statistics, as JSON. See `app.analytics.profiler`."""
 
 
 class RunError(BaseModel):
@@ -84,6 +97,8 @@ class AnalysisState(TypedDict, total=False):
     """Qualified names the SQL guard will accept. Excludes anything marked
     non-queryable, so a table hidden from the model is also blocked if guessed."""
     known_columns: dict[str, list[str]]
+    dimensions: list[DimensionInfo]
+    """Low-cardinality columns the Analysis Agent may break a metric down by."""
 
     # ── The current step; overwritten each time round the loop ───────────────
     mode: Literal["primary", "drilldown"]
@@ -97,6 +112,16 @@ class AnalysisState(TypedDict, total=False):
 
     # ── Accumulated; nodes append, never replace ─────────────────────────────
     queries: Annotated[list[ExecutedQuery], operator.add]
+
+    # ── Drill-down: what has been investigated, so the loop cannot repeat itself ─
+    drilldown_depth: int
+    filter_path: list[dict[str, str]]
+    used_dimensions: list[str]
+    drill: DrillDownRequest | None
+    """The approved request the next Query Agent call must carry out."""
+    analysis_rounds: Annotated[list[AnalysisAgentOutput], operator.add]
+    notes: Annotated[list[str], operator.add]
+    """Caveats to show with the final answer, such as why an investigation stopped."""
 
     # ── Established by the first query, then held fixed ──────────────────────
     question_type: str | None

@@ -76,6 +76,9 @@ class Settings(BaseSettings):
 
     llm_timeout_seconds: int = 60
     llm_max_retries: int = 2
+    llm_max_retry_wait_seconds: float = 45.0
+    """The longest rate-limit wait worth sitting through before moving to the next
+    model. Free tiers ask for waits of about 20s; a worse model is usually slower."""
     llm_max_concurrency: int = 2
     """Semaphore width. Free tiers have low per-minute limits."""
 
@@ -126,6 +129,12 @@ class Settings(BaseSettings):
 
     # ── Agent budgets (see PROJECT_PLAN §15.5) ───────────────────────────────
     max_drilldown_depth: int = 3
+    drilldown_reconcile_tolerance_pct: float = 15.0
+    """How far a breakdown's total may differ from the figure it broke down. Loose on
+    purpose: discounts and nulls cause small, legitimate gaps, while the fan-out
+    errors this exists to catch are multiples."""
+    drilldown_materiality_pct: float = 5.0
+    """A change smaller than this is not worth investigating."""
     max_llm_calls_per_analysis: int = 12
     max_tokens_per_analysis: int = 80_000
     max_sql_repair_attempts: int = 2

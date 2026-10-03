@@ -168,8 +168,12 @@ def build_registry(
     if not chain:
         raise RegistryError("No LLM models configured. Set `llm.chain` or LLM_FALLBACK_CHAIN.")
 
+    # A blank override means "not set", so it must not displace what the file says.
+    # Merging first and filtering afterwards let an empty environment variable erase
+    # the file's value: settings pass empty strings for every unset override.
+    explicit = {agent: value for agent, value in (agent_overrides or {}).items() if value}
     overrides: dict[str, ModelRef] = {}
-    for agent, value in {**(llm.get("agents") or {}), **(agent_overrides or {})}.items():
+    for agent, value in {**(llm.get("agents") or {}), **explicit}.items():
         if value:
             overrides[agent] = ModelRef.parse(value)
 

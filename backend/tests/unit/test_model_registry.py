@@ -80,6 +80,28 @@ def test_per_agent_override_is_recorded(registry_file) -> None:
     assert "analysis" not in registry.agent_overrides, "a null override is not an override"
 
 
+def test_a_blank_override_does_not_erase_the_files_value(tmp_path) -> None:
+    """Settings pass an empty string for every override that is not set. Merged naively,
+    those blanks replaced the agent models chosen in the file."""
+    data = {**SAMPLE, "llm": {**SAMPLE["llm"], "agents": {"analysis": "groq:openai/gpt-oss-20b"}}}
+    path = tmp_path / "models.yaml"
+    path.write_text(yaml.safe_dump(data))
+
+    registry = build_registry(
+        path, agent_overrides={"query": "", "analysis": "", "visualization": ""}
+    )
+    assert registry.agent_overrides["analysis"].model == "openai/gpt-oss-20b"
+
+
+def test_a_real_override_does_win_over_the_file(tmp_path) -> None:
+    data = {**SAMPLE, "llm": {**SAMPLE["llm"], "agents": {"analysis": "groq:openai/gpt-oss-20b"}}}
+    path = tmp_path / "models.yaml"
+    path.write_text(yaml.safe_dump(data))
+
+    registry = build_registry(path, agent_overrides={"analysis": "groq:openai/gpt-oss-120b"})
+    assert registry.agent_overrides["analysis"].model == "openai/gpt-oss-120b"
+
+
 def test_capabilities_fall_back_to_the_default(registry_file) -> None:
     registry = build_registry(registry_file)
 

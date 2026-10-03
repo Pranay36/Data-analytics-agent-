@@ -53,6 +53,22 @@ def show(result, verbose: bool) -> None:
             if query.row_count > 8:
                 print(f"     ... {query.row_count - 8} more")
 
+    for number, round_ in enumerate(state.get("analysis_rounds", []), start=1):
+        print(f"\nanalysis {number} ({round_.confidence} confidence)")
+        print(f"  {round_.summary}")
+        for finding in round_.findings:
+            print(f"  - {finding.statement}")
+        if round_.needs_drilldown and round_.drilldown:
+            drill = round_.drilldown
+            print(f"  => drill into {drill.dimension} "
+                  f"within {drill.focus_value or '(overall)'}: {drill.rationale}")
+
+    if state.get("drilldown_depth"):
+        print(f"\ninvestigated {state['drilldown_depth']} level(s): "
+              f"{' -> '.join(state.get('used_dimensions', []))}")
+    for note in state.get("notes", []):
+        print(f"note   : {note}")
+
     print(f"\nresult : {state.get('stop_reason')}", end="")
     if (error := state.get("error")) is not None:
         print(f"  [{error.code}] {error.message}", end="")

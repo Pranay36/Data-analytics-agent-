@@ -15,7 +15,7 @@ from app.db.models import Analysis, AnalysisQuery
 from app.db.session import get_sessionmaker
 from app.services.analysis_runner import run_analysis
 
-from .conftest import EMBEDDINGS, REVENUE_SQL, reply, scripted_llm
+from .conftest import EMBEDDINGS, REVENUE_SQL, analysis, reply, scripted_llm
 
 pytestmark = pytest.mark.integration
 
@@ -34,16 +34,17 @@ async def stored_queries(analysis_id: str):
 
 
 # ── Success ──────────────────────────────────────────────────────────────────
-async def test_a_correct_query_is_answered_in_one_model_call(source) -> None:
+async def test_a_correct_query_costs_one_query_call_and_one_analysis_call(source) -> None:
     result, provider = await run(
         source, "What was revenue in May 2026?",
         reply(sql=REVENUE_SQL, question_type="metric", tables_used=["orders"]),
+        analysis(),
     )
 
     state = result.state
     assert state["stop_reason"] == "answered"
-    assert result.llm_calls == 1
-    assert len(provider.requests) == 1
+    assert result.llm_calls == 2
+    assert len(provider.requests) == 2
 
     query = state["queries"][-1]
     assert query.status == "succeeded"
@@ -52,7 +53,7 @@ async def test_a_correct_query_is_answered_in_one_model_call(source) -> None:
 
 
 async def test_the_executed_sql_is_the_guards_rewrite_with_a_row_cap(source) -> None:
-    result, _ = await run(source, "revenue in May", reply(sql=REVENUE_SQL))
+    result, _ = await run(source, "revenue in May", reply(sql=REVENUE_SQL), analysis())
 
     executed = result.state["queries"][-1]
     assert "LIMIT 500" in executed.sql, "the model's SQL must not run unmodified"
@@ -60,15 +61,17 @@ async def test_the_executed_sql_is_the_guards_rewrite_with_a_row_cap(source) -> 
 
 
 async def test_the_run_is_recorded(source) -> None:
-    result, _ = await run(source, "revenue in May", reply(sql=REVENUE_SQL, question_type="metric"))
+    result, _ = await run(
+        source, "revenue in May", reply(sql=REVENUE_SQL, question_type="metric"), analysis()
+    )
 
     async with get_sessionmaker()() as session:
-        analysis = await session.get(Analysis, result.analysis_id)
+        row = await session.get(Analysis, result.analysis_id)
 
-    assert analysis.status == "completed"
-    assert analysis.stop_reason == "answered"
-    assert analysis.question_type == "metric"
-    assert analysis.retrieved_context["chunks"], "what retrieval supplied must be inspectable"
+    assert row.status == "completed"
+    assert row.stop_reason == "answered"
+    assert row.question_type == "metric"
+    assert row.retrieved_context["chunks"], "what retrieval supplied must be inspectable"
 
     rows = await stored_queries(result.analysis_id)
     assert [r.status for r in rows] == ["succeeded"]
@@ -80,6 +83,7 @@ async def test_the_first_query_fixes_the_question_type_and_frame(source) -> None
     result, _ = await run(
         source, "revenue in May",
         reply(sql=REVENUE_SQL, question_type="comparison", frame=frame),
+        analysis(),
     )
     assert result.state["question_type"] == "comparison"
     assert result.state["frame"].metric_name == "Revenue"
@@ -91,10 +95,11 @@ async def test_a_rejected_query_is_repaired_using_the_specific_reason(source) ->
         source, "revenue in May",
         reply(sql="SELECT o.region FROM orders o"),   # a column that does not exist
         reply(sql=REVENUE_SQL),
+        analysis(),
     )
 
     assert result.state["stop_reason"] == "answered"
-    assert len(provider.requests) == 2
+    assert len(provider.requests) == 3
 
     repair_prompt = provider.requests[1].messages[-1].content
     assert "PREVIOUS QUERY FAILED" in repair_prompt
@@ -109,6 +114,7 @@ async def test_a_dangerous_query_never_reaches_the_database(source) -> None:
         source, "revenue",
         reply(sql="SELECT 1; DROP TABLE orders"),
         reply(sql=REVENUE_SQL),
+        analysis(),
     )
     rows = await stored_queries(result.analysis_id)
     assert rows[0].status == "rejected"
@@ -121,6 +127,7 @@ async def test_a_database_error_is_repaired(source) -> None:
         source, "revenue",
         reply(sql="SELECT CAST(status AS integer) AS bad FROM orders"),
         reply(sql=REVENUE_SQL),
+        analysis(),
     )
     rows = await stored_queries(result.analysis_id)
     assert [r.status for r in rows] == ["failed", "succeeded"]
@@ -133,6 +140,7 @@ async def test_zero_rows_triggers_exactly_one_retry_with_hints(source) -> None:
         source, "revenue in May",
         reply(sql=wrong_literal),
         reply(sql=REVENUE_SQL),
+        analysis(),
     )
 
     assert result.state["stop_reason"] == "answered"
@@ -144,7 +152,9 @@ async def test_an_aggregate_over_nothing_counts_as_empty(source) -> None:
     """SUM over no rows returns ONE row of NULL, not zero rows. A row-count check
     alone would accept it as an answer."""
     wrong = REVENUE_SQL.replace("'SUCCESS'", "'completed'")
-    result, _ = await run(source, "revenue", reply(sql=wrong), reply(sql=REVENUE_SQL))
+    result, _ = await run(
+        source, "revenue", reply(sql=wrong), reply(sql=REVENUE_SQL), analysis()
+    )
 
     first = result.state["queries"][0]
     assert first.row_count == 1 and first.rows[0][0] is None, "premise: one NULL row"
@@ -154,11 +164,13 @@ async def test_an_aggregate_over_nothing_counts_as_empty(source) -> None:
 async def test_a_second_empty_result_is_accepted_as_the_answer(source) -> None:
     """'No data for that period' is a legitimate result, not a failure."""
     empty = REVENUE_SQL.replace("2026-05-01", "2030-05-01").replace("2026-06-01", "2030-06-01")
-    result, provider = await run(source, "revenue in 2030", reply(sql=empty), reply(sql=empty))
+    result, provider = await run(
+        source, "revenue in 2030", reply(sql=empty), reply(sql=empty), analysis()
+    )
 
     assert result.state["stop_reason"] == "answered"
     assert result.state["queries"][-1].rows == [[None]], "an empty aggregate is one NULL row"
-    assert len(provider.requests) == 2, "one retry, then accept"
+    assert len(provider.requests) == 3, "one retry, then accept, then analyse"
 
 
 # ── Bounded ──────────────────────────────────────────────────────────────────
@@ -172,8 +184,8 @@ async def test_repairs_are_bounded(source) -> None:
     assert result.state["error"].code == "INVALID_SQL"
 
     async with get_sessionmaker()() as session:
-        analysis = await session.get(Analysis, result.analysis_id)
-    assert analysis.status == "failed"
+        row = await session.get(Analysis, result.analysis_id)
+    assert row.status == "failed"
 
 
 # ── Refusal and failure ──────────────────────────────────────────────────────
@@ -188,8 +200,8 @@ async def test_a_refusal_completes_rather_than_fails(source) -> None:
     assert result.state["queries"] == [], "nothing may be executed after a refusal"
 
     async with get_sessionmaker()() as session:
-        analysis = await session.get(Analysis, result.analysis_id)
-    assert analysis.status == "completed"
+        row = await session.get(Analysis, result.analysis_id)
+    assert row.status == "completed"
 
 
 async def test_all_models_failing_is_reported_not_raised(source) -> None:

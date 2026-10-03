@@ -87,3 +87,79 @@ class QueryAgentOutput(BaseModel):
         if not self.can_answer and not self.cannot_answer_reason:
             raise ValueError("cannot_answer_reason is required when can_answer is false")
         return self
+
+
+class Finding(BaseModel):
+    statement: str = Field(
+        description="One factual sentence using only numbers from the data provided."
+    )
+    evidence_query_seq: list[int] = Field(
+        default_factory=list, description="Query numbers (seq) that support it."
+    )
+    importance: Literal["high", "medium", "low"] = "medium"
+
+
+class DrillDownProposal(BaseModel):
+    """What the Analysis Agent is asked for: which segment, and what to split it by.
+
+    Deliberately small. It originally asked the model to build the whole filter, as
+    `{"orders.shipping_region": "South"}`, and a lighter model wrote
+    `{"orders": "shipping_region"}` instead. The code already knows which dimension
+    the last breakdown used, so the model is asked only for the *value*. Every field
+    it no longer has to get right is a way for it to fail that has been removed.
+    """
+
+    dimension: str = Field(
+        description="Column to break down by, exactly as listed under AVAILABLE DIMENSIONS, "
+        "e.g. 'products.category'."
+    )
+    focus_value: str | None = Field(
+        default=None,
+        description="The segment to investigate, exactly as shown in the data, e.g. 'South'. "
+        "Leave empty when only an overall figure exists.",
+    )
+    step_question: str = Field(
+        description="The follow-up question, e.g. 'How did revenue change by category "
+        "within South, May vs June 2026?'"
+    )
+    rationale: str = Field(description="One sentence on why this is worth investigating.")
+
+
+class DrillDownRequest(BaseModel):
+    """A proposal resolved into something the guard and the Query Agent can act on.
+
+    Built by code from a `DrillDownProposal` plus what the run already knows. A
+    request only; whether it is acted on is decided by deterministic code, which
+    checks depth, budget, and that the dimension and value really exist.
+    """
+
+    dimension: str = Field(
+        description="Column to break down by, exactly as listed under AVAILABLE DIMENSIONS, "
+        "e.g. 'products.category'."
+    )
+    focus_filter: dict[str, str] = Field(
+        description="The segment to restrict to, as {dimension: value}, "
+        "e.g. {'orders.shipping_region': 'South'}."
+    )
+    step_question: str = Field(
+        description="The follow-up question, e.g. 'How did revenue change by category "
+        "within South, May vs June 2026?'"
+    )
+    rationale: str = Field(description="One sentence on why this is worth investigating.")
+
+
+class AnalysisAgentOutput(BaseModel):
+    summary: str = Field(
+        description="The headline answer to the user's question, one to three sentences."
+    )
+    findings: list[Finding] = Field(default_factory=list, max_length=6)
+    needs_drilldown: bool = False
+    drilldown: DrillDownProposal | None = None
+    confidence: Literal["high", "medium", "low"] = "medium"
+    caveats: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _drilldown_needs_a_request(self) -> AnalysisAgentOutput:
+        if self.needs_drilldown and self.drilldown is None:
+            raise ValueError("drilldown is required when needs_drilldown is true")
+        return self
