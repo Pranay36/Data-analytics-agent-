@@ -12,7 +12,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, uuid_pk
 
-EMBEDDING_DIM = 384
+EMBEDDING_DIM = 1024
 
 
 class KnowledgeChunk(Base, TimestampMixin):
@@ -49,6 +49,9 @@ class KnowledgeChunk(Base, TimestampMixin):
     """auto (built from the catalog) | seed | user"""
 
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    """Which model produced `embedding`. Vectors from different models are not
+    comparable, so this is how a model change finds the rows to re-embed."""
     # Unused until hybrid retrieval, but cheaper to create now than to migrate later.
     search_tsv: Mapped[Any] = mapped_column(
         TSVECTOR,

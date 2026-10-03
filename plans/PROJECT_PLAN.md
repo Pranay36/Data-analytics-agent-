@@ -241,7 +241,7 @@ Agent360 optimizes for **open-ended exploration** with a strong paid model. Insi
 | Orchestration | **LangGraph** | Stateful agent workflow with conditional loop | P0 |
 | LLM providers | **Free tiers behind our `LLMProvider`**: Gemini (primary), Groq, OpenRouter `:free` — all OpenAI-compatible, used via the `openai` SDK | Zero spend; independent quotas stacked in one fallback chain; swappable (see §17.6) | P0 |
 | Retries | **tenacity** | Backoff on 429/5xx/timeouts | P0 |
-| Embeddings | **fastembed** `BAAI/bge-small-en-v1.5` (384-d, CPU/ONNX) | Free, local, no API key, no rate limit | P0 |
+| Embeddings | **OpenRouter free embedding model** `liquid/lfm-2.5-embedding-350m:free` (1024-d), behind an `EmbeddingProvider` interface | Free, no 200 MB local ML download, same API key as the LLM. Verified: right table in the top 3 for 10/10 test questions. Vectors are model-specific, so the model name is stored per chunk | P0 |
 | SQL parsing | **sqlglot** | Dialect-aware parsing for the SQL guard + eval (table/column extraction) | P0 |
 | CSV engine | **DuckDB** | SQL over uploaded CSVs | P0 |
 | Postgres driver (analytics) | **psycopg 3** (sync) | Customer Postgres connector | P0 |
@@ -762,7 +762,7 @@ Purpose: **the RAG index.** One row per retrievable unit.
 | `title` | e.g. `orders`, `Revenue`, `Monthly revenue by region` |
 | `content` | the text that is embedded and shown to the LLM |
 | `payload` | JSONB — structured fields: for definitions `{sql_expression, tables, synonyms}`, for examples `{question, sql}` |
-| `embedding` | `vector(384)` |
+| `embedding` | `vector(1024)` |
 | `search_tsv` | `tsvector` **generated** from title + content (for FTS) |
 | `source` | `auto` (generated from catalog) / `user` / `seed` |
 | `updated_at` | |

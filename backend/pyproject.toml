@@ -34,15 +34,6 @@ dependencies = [
     "httpx>=0.27.0",
 ]
 
-[project.optional-dependencies]
-# Local embeddings pull in onnxruntime (~200 MB). They are only needed once the
-# RAG layer exists, so they install separately:  uv sync --extra rag
-# `app.rag.embeddings` defines the EmbeddingProvider interface regardless, so the
-# seam is present even before the implementation is installed.
-rag = [
-    "fastembed>=0.4.0",
-]
-
 [dependency-groups]
 dev = [
     "pytest>=8.3.0",

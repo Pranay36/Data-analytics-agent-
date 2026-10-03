@@ -52,10 +52,17 @@ class Settings(BaseSettings):
     """Fernet key for datasource passwords. Required outside `local`."""
 
     # ── LLM providers (see PROJECT_PLAN §17.6) ───────────────────────────────
-    llm_fallback_chain: Annotated[list[str], NoDecode] = []
-    """Ordered `provider:model` entries, tried in sequence. Example:
-    `gemini:gemini-2.0-flash,groq:llama-3.3-70b-versatile,openrouter:some/model:free`
-    """
+    llm_fallback_chain: Annotated[list[str], NoDecode] = [
+        "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+        "openrouter:qwen/qwen3.8-27b:free",
+        "groq:openai/gpt-oss-120b",
+    ]
+    """Ordered `provider:model` entries, tried in sequence. The default is the set
+    verified to return correct, guard-approved SQL in both structured-output modes.
+    Free-tier availability changes often, so override via LLM_FALLBACK_CHAIN.
+
+    Avoid `openrouter/free`: it picks a model per request, so behaviour is not
+    reproducible (observed: plain text instead of JSON, and a 39s response)."""
 
     gemini_api_key: SecretStr = SecretStr("")
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
@@ -81,8 +88,15 @@ class Settings(BaseSettings):
     llm_cache_mode: Literal["off", "read_write", "record"] = "read_write"
 
     # ── Embeddings ───────────────────────────────────────────────────────────
-    embedding_model: str = "BAAI/bge-small-en-v1.5"
-    embedding_dim: int = 384
+    embedding_provider: str = "openrouter"
+    embedding_model: str = "liquid/lfm-2.5-embedding-350m:free"
+    embedding_dim: int = 1024
+    """Must match `knowledge_chunks.embedding`. Vectors from different models are
+    not comparable, so changing the model means re-embedding everything.
+
+    Why this model: free, 1024-d (fits pgvector's 2000-d HNSW limit), and it put
+    the right table in the top 3 for 10 of 10 test questions. nemotron-3-embed-1b
+    scored marginally higher but only offers 2048 dimensions."""
 
     # ── RAG ──────────────────────────────────────────────────────────────────
     rag_top_k_tables: int = 5

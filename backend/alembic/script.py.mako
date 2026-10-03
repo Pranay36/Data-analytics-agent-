@@ -9,6 +9,9 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+# Autogenerate references pgvector types without importing them; every
+# migration needs this or it fails with NameError at upgrade time.
+import pgvector.sqlalchemy  # noqa: F401
 ${imports if imports else ""}
 
 # revision identifiers, used by Alembic.
