@@ -72,17 +72,29 @@ llm:
       "openrouter:openrouter/free": [tool_call, prompt_json]
 
 embeddings:
-  default: openrouter:liquid/lfm-2.5-embedding-350m:free
+  default: gemini:gemini-embedding-2
 
   # `dimension` must match the stored vector column. Changing to a model of a
   # different width needs a migration and a full re-index, because vectors from
   # different models cannot be compared — a mixed index returns nonsense rather
   # than failing.
   models:
+    "gemini:gemini-embedding-2":
+      dimension: 1024
+      request_dimensions: true
+      notes: >-
+        In use. Natively 3072 dimensions, which exceeds pgvector's 2,000-dimension
+        limit for HNSW indexes, so a 1024-wide vector is requested explicitly. The
+        model supports this directly and still returns a unit vector, so no
+        re-normalising is needed and the existing column and index are unchanged.
+        Chosen because OpenRouter's free tier allows only 50 requests a day across
+        chat and embeddings combined, which one re-index plus one evaluation run
+        exhausts.
+
     "openrouter:liquid/lfm-2.5-embedding-350m:free":
       dimension: 1024
       notes: >-
-        In use. Retrieved every needed table across a 21-question set, and never
+        Previously in use. Retrieved every needed table across a 21-question set, and never
         ranked the decoy archive above the real orders table. Scores are
         compressed (a correct table lands near 0.2), which is why filtering is
         relative to the best match rather than an absolute threshold.
@@ -94,6 +106,7 @@ embeddings:
         2,000-dimension limit for HNSW indexes. Usable only with exact search,
         which is fine at this corpus size but would not scale.
 
-    "gemini:text-embedding-004":
-      dimension: 768
-      notes: Needs GEMINI_API_KEY. A far more generous free tier than OpenRouter.
+    "gemini:gemini-embedding-001":
+      dimension: 1024
+      request_dimensions: true
+      notes: The previous generation. Also natively 3072 dimensions.

@@ -81,6 +81,9 @@ class EmbeddingSpec:
     ref: ModelRef
     dimension: int
     notes: str = ""
+    request_dimensions: bool = False
+    """Ask the API for `dimension` explicitly. Needed by models whose native
+    width exceeds what pgvector can index, but which can return a shorter form."""
 
 
 @dataclass
@@ -185,6 +188,7 @@ def build_registry(
             ref=ModelRef.parse(key),
             dimension=int(spec["dimension"]),
             notes=str(spec.get("notes", "")).strip(),
+            request_dimensions=bool(spec.get("request_dimensions", False)),
         )
         for key, spec in (embeddings.get("models") or {}).items()
     }
@@ -205,7 +209,10 @@ def build_registry(
             extra={"configured": dimension_override, "declared": embedding.dimension},
         )
         embedding = EmbeddingSpec(
-            ref=embedding.ref, dimension=dimension_override, notes=embedding.notes
+            ref=embedding.ref,
+            dimension=dimension_override,
+            notes=embedding.notes,
+            request_dimensions=embedding.request_dimensions,
         )
 
     referenced = {ref.provider for ref in [*chain, *overrides.values(), embedding.ref]}

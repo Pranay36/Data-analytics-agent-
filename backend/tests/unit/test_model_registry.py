@@ -142,14 +142,16 @@ def test_the_shipped_registry_is_valid() -> None:
         assert registry.strategies_for(ref)[0] == "tool_call"
 
 
-def test_groq_leads_the_chain_to_protect_the_scarcer_quota() -> None:
-    """OpenRouter's free tier allows 50 requests a day, shared with embeddings;
-    Groq allows 1,000. Putting OpenRouter first drained the shared allowance on
-    chat alone and left nothing for indexing."""
+def test_work_is_split_across_providers_by_how_scarce_each_quota_is() -> None:
+    """OpenRouter's free tier allows 50 requests a day across chat and embeddings
+    combined, which one re-index plus one evaluation run exhausts. Groq allows
+    1,000 chat requests, and Gemini's embedding tier is separate again, so each
+    load sits on the provider that can carry it and OpenRouter is a fallback."""
     registry = build_registry(REGISTRY_PATH)
 
-    assert registry.chain[0].provider == "groq"
-    assert registry.embedding.ref.provider == "openrouter"
+    assert registry.chain[0].provider == "groq", "chat belongs on the larger chat quota"
+    assert registry.embedding.ref.provider == "gemini", "embeddings on their own quota"
+    assert any(ref.provider == "openrouter" for ref in registry.chain), "kept as a fallback"
 
 
 def test_the_selected_embedding_model_fits_the_database_column() -> None:

@@ -26,6 +26,10 @@ from app.llm.errors import (
     RateLimited,
 )
 from app.llm.types import LLMRequest, LLMResponse, Usage
+from app.observability.rate_limits import (
+    get_rate_limit_tracker,
+    parse_reset_header,
+)
 
 # OpenRouter reports a withdrawn or misspelt model as HTTP 400 ("... is not a valid
 # model ID") rather than 404. Read as a bad request it would be retried under every
@@ -107,7 +111,16 @@ class OpenAICompatibleProvider(LLMProvider):
                 **self._body(request), timeout=request.timeout_seconds
             )
         except openai.RateLimitError as exc:
-            raise RateLimited(f"{self.name}: rate limited", retry_after=_retry_after(exc)) from exc
+            retry_after = _retry_after(exc)
+            state = get_rate_limit_tracker().record(
+                self.name,
+                retry_after=retry_after,
+                reset_at=parse_reset_header(exc.response.headers.get("x-ratelimit-reset")),
+                message=str(getattr(exc, "message", exc)),
+            )
+            raise RateLimited(
+                f"{self.name}: rate limited ({state.describe()})", retry_after=retry_after
+            ) from exc
         except openai.APITimeoutError as exc:
             raise ProviderTimeout(f"{self.name}: timed out") from exc
         except openai.APIConnectionError as exc:

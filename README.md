@@ -105,8 +105,17 @@ embeddings:
   default: openrouter:liquid/lfm-2.5-embedding-350m:free
 ```
 
-Groq leads the chain on purpose: its free tier allows 1,000 requests a day against
-OpenRouter's 50, and those 50 are reserved for embeddings.
+Work is split by how scarce each free tier is. OpenRouter allows 50 requests a day
+across chat and embeddings combined — one re-index plus one evaluation run exhausts
+it — so chat runs on Groq (1,000/day), embeddings on Gemini (a separate allowance),
+and OpenRouter stays as a fallback.
+
+When a provider does refuse a request, that is tracked and reported by
+`GET /health/ready`, including when the allowance returns:
+
+```json
+{"rate_limits": {"openrouter": "rate limited (3x), resets in 4h"}}
+```
 
 Environment variables override the file, so a deployment needs no edit:
 

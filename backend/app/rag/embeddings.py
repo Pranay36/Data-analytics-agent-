@@ -22,6 +22,8 @@ from abc import ABC, abstractmethod
 
 import httpx
 
+from app.observability.rate_limits import get_rate_limit_tracker, parse_reset_header
+
 logger = logging.getLogger(__name__)
 
 # Free endpoints are rate-limited and occasionally slow; keep batches modest and
@@ -33,6 +35,13 @@ _BACKOFF_SECONDS = 2.0
 
 class EmbeddingError(RuntimeError):
     pass
+
+
+def _as_float(value: str | None) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except ValueError:
+        return None
 
 
 class EmbeddingProvider(ABC):
@@ -60,12 +69,16 @@ class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
         api_key: str,
         model: str,
         dimension: int,
+        request_dimensions: bool = False,
         client: httpx.AsyncClient | None = None,
         sleep=asyncio.sleep,
     ) -> None:
         self.name = name
         self.model = model
         self.dimension = dimension
+        self._request_dimensions = request_dimensions
+        """Ask the API for a specific width. Some models emit vectors wider than
+        pgvector can index, but can return a shortened form on request."""
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._client = client
@@ -76,10 +89,13 @@ class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
         try:
             for attempt in range(_MAX_ATTEMPTS):
                 try:
+                    body: dict = {"model": self.model, "input": texts}
+                    if self._request_dimensions:
+                        body["dimensions"] = self.dimension
                     response = await client.post(
                         f"{self._base_url}/embeddings",
                         headers={"Authorization": f"Bearer {self._api_key}"},
-                        json={"model": self.model, "input": texts},
+                        json=body,
                     )
                 except httpx.HTTPError as exc:
                     if attempt == _MAX_ATTEMPTS - 1:
@@ -92,6 +108,14 @@ class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
                     # The API does not promise ordering; `index` does.
                     ordered = sorted(data, key=lambda item: item.get("index", 0))
                     return [item["embedding"] for item in ordered]
+
+                if response.status_code == 429:
+                    get_rate_limit_tracker().record(
+                        self.name,
+                        retry_after=_as_float(response.headers.get("retry-after")),
+                        reset_at=parse_reset_header(response.headers.get("x-ratelimit-reset")),
+                        message=response.text[:200],
+                    )
 
                 retryable = response.status_code == 429 or response.status_code >= 500
                 if not retryable or attempt == _MAX_ATTEMPTS - 1:
@@ -201,6 +225,7 @@ def build_embedding_provider(settings=None) -> EmbeddingProvider:
         api_key=api_key,
         model=spec.ref.model,
         dimension=spec.dimension,
+        request_dimensions=spec.request_dimensions,
     )
 
     if settings.embedding_cache_enabled:
