@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Secrets and local state
+.env
+.env.local
+backend/.env
+
+# Generated / cached artifacts
+backend/.llm_cache/
+data/
+demo_data/generated/
+reports/*.md
+*.duckdb
+
+# Node
+node_modules/
+.next/
+out/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

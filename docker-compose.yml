@@ -1,0 +1,71 @@
+# InsightFlow local stack.
+#
+# Two Postgres servers on purpose — they make the two data planes physical
+# (PROJECT_PLAN §2.3):
+#   appdb          = InsightFlow's own metadata + vectors   (system plane)
+#   demo-analytics = the "customer" warehouse we query      (analytical plane)
+#
+# They are separate servers with separate credentials, exactly as in production,
+# where the first becomes a managed Postgres and the second is a customer's own.
+
+services:
+  appdb:
+    image: pgvector/pgvector:pg16
+    container_name: insightflow-appdb
+    environment:
+      POSTGRES_DB: insightflow
+      POSTGRES_USER: insightflow
+      POSTGRES_PASSWORD: insightflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - appdb_data:/var/lib/postgresql/data
+      - ./demo_data/appdb/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U insightflow -d insightflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  demo-analytics:
+    image: postgres:16
+    container_name: insightflow-demo-analytics
+    environment:
+      POSTGRES_DB: shopsphere
+      POSTGRES_USER: shopsphere
+      POSTGRES_PASSWORD: shopsphere
+    ports:
+      - "5433:5432"
+    volumes:
+      - demo_analytics_data:/var/lib/postgresql/data
+      - ./demo_data/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shopsphere -d shopsphere"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ClickHouse — added in sprint block for Phase 13. Start with:
+  #   docker compose --profile clickhouse up -d
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    container_name: insightflow-clickhouse
+    profiles: ["clickhouse"]
+    environment:
+      CLICKHOUSE_DB: shopsphere
+      CLICKHOUSE_USER: shopsphere
+      CLICKHOUSE_PASSWORD: shopsphere
+    ports:
+      - "8123:8123"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  appdb_data:
+  demo_analytics_data:
+  clickhouse_data:
