@@ -13,6 +13,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base, TimestampMixin, uuid_pk
 
 EMBEDDING_DIM = 1024
+"""Width of the stored vector column.
+
+Deliberately a constant and not a setting: it is part of the database schema, so
+changing it requires a migration and a full re-index. `models.yaml` declares each
+model's dimension, and the app refuses to start if the selected model disagrees
+with this value.
+"""
 
 
 class KnowledgeChunk(Base, TimestampMixin):

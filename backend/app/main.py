@@ -32,10 +32,43 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
 
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
+    _check_embedding_dimension()
 
     yield
 
     logger.info("shutting down InsightFlow")
+
+
+def _check_embedding_dimension() -> None:
+    """Refuse to start if the chosen embedding model does not fit the column.
+
+    Caught here, the message names the problem. Caught at insert time, it
+    surfaces as an opaque "expected 1024 dimensions, not 768" from the driver,
+    halfway through indexing.
+    """
+    from app.core.model_registry import RegistryError, get_registry
+    from app.db.models.knowledge import EMBEDDING_DIM
+
+    try:
+        embedding = get_registry().embedding
+    except RegistryError as exc:
+        raise RuntimeError(f"Invalid model configuration: {exc}") from exc
+
+    if embedding.dimension != EMBEDDING_DIM:
+        raise RuntimeError(
+            f"Embedding model {embedding.ref.key!r} produces {embedding.dimension} "
+            f"dimensions, but the knowledge_chunks.embedding column is "
+            f"{EMBEDDING_DIM}. Either choose a {EMBEDDING_DIM}-dimension model in "
+            f"models.yaml, or add a migration changing the column and re-index."
+        )
+
+    logger.info(
+        "model configuration",
+        extra={
+            "llm_chain": [ref.key for ref in get_registry().chain],
+            "embedding": embedding.ref.key,
+        },
+    )
 
 
 def create_app() -> FastAPI:

@@ -1,39 +1,60 @@
-"""Build providers from settings.
+"""Build LLM providers from the model registry.
 
-Only providers that appear in the fallback chain *and* have credentials are
-constructed. A chain entry whose provider has no key is skipped at call time
-with a clear reason, rather than failing the whole application at startup — the
-usual state while Gemini has no key yet.
+Only providers actually referenced are constructed, and one without credentials
+is skipped rather than fatal — the usual state while a key is still missing.
 """
 
 from __future__ import annotations
 
+import logging
+import os
+
 from app.core.config import Settings
+from app.core.model_registry import get_registry
 from app.llm.base import LLMProvider
 from app.llm.openai_compatible import OpenAICompatibleProvider
 from app.llm.types import ChainEntry
 
+logger = logging.getLogger(__name__)
+
+# Keys are read from settings where one exists, so a value in .env is picked up
+# without the registry needing to know about pydantic.
+_SETTINGS_FIELDS = {
+    "OPENROUTER_API_KEY": "openrouter_api_key",
+    "GROQ_API_KEY": "groq_api_key",
+    "GEMINI_API_KEY": "gemini_api_key",
+}
+
+
+def _api_key(settings: Settings, env_name: str | None) -> str:
+    """A local provider needs no key, so a missing `api_key_env` means 'none required'."""
+    if env_name is None:
+        return "not-required"
+    field = _SETTINGS_FIELDS.get(env_name)
+    if field is not None:
+        return getattr(settings, field).get_secret_value()
+    return os.environ.get(env_name, "")
+
 
 def build_providers(settings: Settings, chain: list[ChainEntry]) -> dict[str, LLMProvider]:
-    wanted = {entry.provider for entry in chain}
+    registry = get_registry()
     providers: dict[str, LLMProvider] = {}
 
-    sources: dict[str, tuple[str, str, dict[str, str] | None]] = {
-        "openrouter": (
-            settings.openrouter_base_url,
-            settings.openrouter_api_key.get_secret_value(),
-            {"X-Title": "InsightFlow"},
-        ),
-        "groq": (settings.groq_base_url, settings.groq_api_key.get_secret_value(), None),
-        "gemini": (settings.gemini_base_url, settings.gemini_api_key.get_secret_value(), None),
-        # Local Ollama needs no key.
-        "ollama": (settings.ollama_base_url, "ollama", None),
-    }
+    for name in {entry.provider for entry in chain}:
+        spec = registry.provider(name)
+        if spec is None:
+            logger.warning("provider not defined in models.yaml", extra={"provider": name})
+            continue
 
-    for name in wanted & sources.keys():
-        base_url, api_key, headers = sources[name]
-        if api_key:
-            providers[name] = OpenAICompatibleProvider(
-                name, base_url, api_key, default_headers=headers
+        key = _api_key(settings, spec.api_key_env)
+        if not key:
+            logger.info(
+                "skipping provider with no credentials",
+                extra={"provider": name, "expected_env": spec.api_key_env},
             )
+            continue
+
+        providers[name] = OpenAICompatibleProvider(
+            name, spec.base_url, key, default_headers=spec.headers or None
+        )
     return providers

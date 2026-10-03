@@ -1,6 +1,8 @@
+"""Chain parsing and capability lookup."""
+
 import pytest
 
-from app.core.config import DEFAULT_LLM_CHAIN, Settings
+from app.core.model_registry import REGISTRY_PATH, build_registry
 from app.llm.capabilities import strategies_for
 from app.llm.types import ChainEntry
 
@@ -18,21 +20,11 @@ def test_malformed_chain_entries_are_rejected(bad: str) -> None:
         ChainEntry.parse(bad)
 
 
-def test_a_blank_chain_setting_means_use_the_default(monkeypatch) -> None:
-    """`.env.example` used to ship `LLM_FALLBACK_CHAIN=`, which silently emptied the chain."""
-    monkeypatch.setenv("LLM_FALLBACK_CHAIN", "")
-    assert Settings(_env_file=None).llm_fallback_chain == DEFAULT_LLM_CHAIN
-
-
-def test_every_default_model_is_declared_and_tries_tool_calls_first() -> None:
-    """Tool-call mode worked on every model probed, so it leads. A default-chain model
-    missing from models.yaml would silently get the conservative fallback instead."""
-    from app.llm import capabilities
-
-    _, declared = capabilities._load()
-    for item in DEFAULT_LLM_CHAIN:
-        assert item in declared, f"{item} is in the default chain but not in models.yaml"
-        assert strategies_for(ChainEntry.parse(item))[0] == "tool_call"
+def test_every_model_in_the_shipped_chain_tries_tool_calls_first() -> None:
+    """Tool-call mode worked on every model probed; JSON-schema mode did not."""
+    for ref in build_registry(REGISTRY_PATH).chain:
+        entry = ChainEntry(provider=ref.provider, model=ref.model)
+        assert strategies_for(entry)[0] == "tool_call"
 
 
 def test_capabilities_reflect_measured_behaviour() -> None:
@@ -42,4 +34,6 @@ def test_capabilities_reflect_measured_behaviour() -> None:
 
 
 def test_unknown_models_get_conservative_defaults() -> None:
-    assert strategies_for(ChainEntry.parse("somewhere:new-model")) == ["tool_call", "prompt_json"]
+    assert strategies_for(ChainEntry.parse("groq:brand-new-model")) == [
+        "tool_call", "prompt_json"
+    ]

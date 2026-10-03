@@ -168,34 +168,39 @@ class FakeEmbeddingProvider(EmbeddingProvider):
 
 
 def build_embedding_provider(settings=None) -> EmbeddingProvider:
+    """Construct the configured embedding provider.
+
+    Which model, which endpoint and how wide its vectors are all come from the
+    model registry (`models.yaml`), so switching models is an edit there.
+    """
     from app.core.config import get_settings
+    from app.core.model_registry import get_registry
+    from app.llm.registry import _api_key
 
     settings = settings or get_settings()
-    providers = {
-        "openrouter": (settings.openrouter_base_url, settings.openrouter_api_key),
-        "groq": (settings.groq_base_url, settings.groq_api_key),
-        "gemini": (settings.gemini_base_url, settings.gemini_api_key),
-    }
-    try:
-        base_url, api_key = providers[settings.embedding_provider]
-    except KeyError:
-        raise EmbeddingError(
-            f"Unknown EMBEDDING_PROVIDER {settings.embedding_provider!r}; "
-            f"expected one of {', '.join(providers)}"
-        ) from None
+    registry = get_registry()
+    spec = registry.embedding
+    provider_spec = registry.provider(spec.ref.provider)
 
-    secret = api_key.get_secret_value()
-    if not secret:
+    if provider_spec is None:
         raise EmbeddingError(
-            f"No API key for embedding provider {settings.embedding_provider!r}."
+            f"Embedding provider {spec.ref.provider!r} is not defined in models.yaml."
+        )
+
+    api_key = _api_key(settings, provider_spec.api_key_env)
+    if not api_key:
+        raise EmbeddingError(
+            f"No API key for embedding provider {spec.ref.provider!r}. "
+            f"Set {provider_spec.api_key_env} in .env, or choose another model "
+            f"under `embeddings.default` in models.yaml."
         )
 
     provider: EmbeddingProvider = OpenAICompatibleEmbeddingProvider(
-        name=settings.embedding_provider,
-        base_url=base_url,
-        api_key=secret,
-        model=settings.embedding_model,
-        dimension=settings.embedding_dim,
+        name=spec.ref.provider,
+        base_url=provider_spec.base_url,
+        api_key=api_key,
+        model=spec.ref.model,
+        dimension=spec.dimension,
     )
 
     if settings.embedding_cache_enabled:

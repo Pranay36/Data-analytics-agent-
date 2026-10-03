@@ -1,0 +1,99 @@
+# Which models InsightFlow uses, and where they come from.
+#
+# Everything here is a default that an environment variable can override, so the
+# app runs with no configuration at all but nothing is hardcoded in Python.
+# Free-tier models are withdrawn and renamed constantly, which is exactly why
+# this is data you can edit rather than code you have to change.
+#
+# Check what currently works:
+#   uv run python -m app.scripts.check_models --probe
+#   uv run python -m app.scripts.eval_retrieval
+
+providers:
+  groq:
+    base_url: https://api.groq.com/openai/v1
+    api_key_env: GROQ_API_KEY
+    # 1,000 requests/day, but only ~8,000 tokens/minute — the token budget binds
+    # first on prompts carrying retrieved context.
+    daily_requests: 1000
+
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    # 50 requests/day on the free tier, shared between chat and embeddings.
+    # Scarce enough that it is reserved for embeddings; see `llm.chain`.
+    daily_requests: 50
+    headers:
+      X-Title: InsightFlow
+
+  gemini:
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+    api_key_env: GEMINI_API_KEY
+
+  ollama:
+    # Local models: unlimited and offline, but you must run `ollama serve`.
+    base_url: http://localhost:11434/v1
+    api_key_env: null
+
+llm:
+  # Tried in order. Groq leads deliberately: it allows 1,000 requests a day
+  # against OpenRouter's 50, and those 50 are needed for embeddings. Putting
+  # OpenRouter first drained the shared daily allowance on chat alone.
+  chain:
+    - groq:openai/gpt-oss-120b
+    - openrouter:nvidia/nemotron-3-super-120b-a12b:free
+    - openrouter:qwen/qwen3.8-27b:free
+
+  # Optional per-agent override, tried ahead of the chain. Give the strongest
+  # model to `query`, where SQL correctness is decided.
+  agents:
+    query: null
+    analysis: null
+    visualization: null
+
+  # How to ask each model for machine-readable output, in order of preference.
+  # Measured, not assumed: a probe asked each model to write a query in each
+  # mode, then ran the SQL through the guard and executed it. Tool calling
+  # worked on all five models tried; JSON-schema mode failed on two.
+  capabilities:
+    default: [tool_call, prompt_json]
+
+    models:
+      "groq:openai/gpt-oss-120b": [tool_call, json_schema, prompt_json]
+      "groq:openai/gpt-oss-20b": [tool_call, json_schema, prompt_json]
+      "openrouter:nvidia/nemotron-3-super-120b-a12b:free": [tool_call, json_schema, prompt_json]
+      "openrouter:qwen/qwen3.8-27b:free": [tool_call, json_schema, prompt_json]
+
+      # Returns HTTP 400 "Failed to generate JSON" in json_schema mode.
+      "groq:qwen/qwen3.8-27b": [tool_call, prompt_json]
+
+      # An auto-router: it picks a model per request, so the same prompt can
+      # return plain text once and JSON the next time. Avoid in the chain.
+      "openrouter:openrouter/free": [tool_call, prompt_json]
+
+embeddings:
+  default: openrouter:liquid/lfm-2.5-embedding-350m:free
+
+  # `dimension` must match the stored vector column. Changing to a model of a
+  # different width needs a migration and a full re-index, because vectors from
+  # different models cannot be compared — a mixed index returns nonsense rather
+  # than failing.
+  models:
+    "openrouter:liquid/lfm-2.5-embedding-350m:free":
+      dimension: 1024
+      notes: >-
+        In use. Retrieved every needed table across a 21-question set, and never
+        ranked the decoy archive above the real orders table. Scores are
+        compressed (a correct table lands near 0.2), which is why filtering is
+        relative to the best match rather than an absolute threshold.
+
+    "openrouter:nvidia/nemotron-3-embed-1b:free":
+      dimension: 2048
+      notes: >-
+        Scored marginally better on a small probe, but exceeds pgvector's
+        2,000-dimension limit for HNSW indexes. Usable only with exact search,
+        which is fine at this corpus size but would not scale.
+
+    "gemini:text-embedding-004":
+      dimension: 768
+      notes: Needs GEMINI_API_KEY. A far more generous free tier than OpenRouter.

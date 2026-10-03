@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
 from app.db.models import KnowledgeChunk
+from app.db.models.knowledge import EMBEDDING_DIM
 from app.rag import FakeEmbeddingProvider, index_chunks
 from app.rag.chunks import ChunkDraft
 from app.rag.indexer import build_table_drafts, reindex_data_source
@@ -62,7 +63,7 @@ async def source(session):
 def provider() -> FakeEmbeddingProvider:
     # The stored column has a fixed width, so a fake must match it or every
     # insert fails on dimension rather than on anything being tested.
-    return FakeEmbeddingProvider(get_settings().embedding_dim)
+    return FakeEmbeddingProvider(EMBEDDING_DIM)
 
 
 async def test_table_drafts_describe_the_catalog(session, source) -> None:
@@ -108,7 +109,7 @@ async def test_changing_the_embedding_model_forces_a_rebuild(session, source, pr
     """Vectors from different models are not comparable; a mixed index is silently wrong."""
     await reindex_data_source(session, source.id, provider)
 
-    other = FakeEmbeddingProvider(get_settings().embedding_dim)
+    other = FakeEmbeddingProvider(EMBEDDING_DIM)
     other.model = "some-other-model"
     result = await reindex_data_source(session, source.id, other)
 

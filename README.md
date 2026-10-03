@@ -88,19 +88,48 @@ curl localhost:8000/api/v1/datasources
 
 ---
 
-## LLM models
+## Choosing models
 
-The app runs on free-tier models behind its own provider interface. Defaults are two
-OpenRouter free models, then Groq; embeddings use OpenRouter's free embedding model.
-Free models are withdrawn without notice, so check what works today:
+Models and providers live in [`backend/models.yaml`](backend/models.yaml) — which
+providers exist, the LLM fallback chain, which structured-output modes each model
+supports, and the embedding model with its vector width. Edit that file to switch
+models; no code changes.
+
+```yaml
+llm:
+  chain:
+    - groq:openai/gpt-oss-120b
+    - openrouter:nvidia/nemotron-3-super-120b-a12b:free
+
+embeddings:
+  default: openrouter:liquid/lfm-2.5-embedding-350m:free
+```
+
+Groq leads the chain on purpose: its free tier allows 1,000 requests a day against
+OpenRouter's 50, and those 50 are reserved for embeddings.
+
+Environment variables override the file, so a deployment needs no edit:
+
+```bash
+LLM_FALLBACK_CHAIN=groq:openai/gpt-oss-120b,openrouter:qwen/qwen3.8-27b:free
+EMBEDDING_MODEL=gemini:text-embedding-004
+LLM_MODEL_QUERY=groq:openai/gpt-oss-120b     # per-agent override
+```
+
+Changing the embedding model to one of a different width needs a migration and a
+re-index, since vectors from different models are not comparable. The app refuses
+to start on a mismatch rather than failing later mid-index.
+
+Free models are withdrawn without notice, so check what currently works:
 
 ```bash
 uv run python -m app.scripts.check_models           # one real question, end to end
 uv run python -m app.scripts.check_models --probe   # every model x strategy
+uv run python -m app.scripts.eval_retrieval         # retrieval quality, 21 questions
 ```
 
-Override the chain with `LLM_FALLBACK_CHAIN` in `.env` (`provider:model,provider:model`).
-Responses are cached on disk, so re-running the same question costs no quota.
+LLM responses and embeddings are both cached on disk, so repeating a question costs
+no quota.
 
 ## Development
 

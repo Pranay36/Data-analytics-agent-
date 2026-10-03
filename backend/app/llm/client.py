@@ -128,17 +128,15 @@ class LLMClient:
     def from_settings(
         cls, settings: Settings | None = None, *, recorder: LlmCallRecorder | None = None
     ) -> LLMClient:
-        settings = settings or get_settings()
-        chain = [ChainEntry.parse(item) for item in settings.llm_fallback_chain]
+        from app.core.model_registry import get_registry
 
+        settings = settings or get_settings()
+        registry = get_registry()
+
+        chain = [ChainEntry(provider=ref.provider, model=ref.model) for ref in registry.chain]
         agent_models = {
-            agent: ChainEntry.parse(value)
-            for agent, value in {
-                "query": settings.llm_model_query,
-                "analysis": settings.llm_model_analysis,
-                "visualization": settings.llm_model_visualization,
-            }.items()
-            if value
+            agent: ChainEntry(provider=ref.provider, model=ref.model)
+            for agent, ref in registry.agent_overrides.items()
         }
 
         cache_on = settings.llm_cache_enabled and settings.llm_cache_mode != "off"
