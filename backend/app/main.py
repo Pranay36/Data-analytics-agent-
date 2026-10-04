@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import analyses, datasources, health
+from app.api.routes import analyses, auth, datasources, health
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 
@@ -32,8 +32,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
 
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
+    settings.require_auth_secret()  # refuse to start rather than sign forgeable tokens
     _check_embedding_dimension()
     await _reconcile_interrupted_runs()
+    await _ensure_accounts()
 
     yield
 
@@ -49,6 +51,21 @@ async def _reconcile_interrupted_runs() -> None:
             logger.warning("marked interrupted analyses as failed", extra={"count": count})
     except Exception as exc:  # noqa: BLE001 - the app must still start without its database
         logger.warning("could not reconcile interrupted analyses", extra={"error": str(exc)})
+
+
+async def _ensure_accounts() -> None:
+    """Create the system account and, if configured, the first administrator."""
+    from app.db.session import get_sessionmaker
+    from app.services import auth_service
+
+    try:
+        async with get_sessionmaker()() as session:
+            await auth_service.ensure_system_user(session)
+            if await auth_service.ensure_seed_admin(session) is not None:
+                logger.info("seed administrator is present")
+            await session.commit()
+    except Exception as exc:  # noqa: BLE001 - the app must still start without its database
+        logger.warning("could not ensure accounts", extra={"error": str(exc)})
 
 
 def _check_embedding_dimension() -> None:
@@ -105,6 +122,7 @@ def create_app() -> FastAPI:
     # Health lives at the root (not under the API prefix) so orchestrator probes
     # are unaffected by API versioning.
     app.include_router(health.router)
+    app.include_router(auth.router, prefix=API_PREFIX)
     app.include_router(datasources.router, prefix=API_PREFIX)
     app.include_router(analyses.router, prefix=API_PREFIX)
 

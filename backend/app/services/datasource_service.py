@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -31,7 +31,7 @@ from app.connectors import (
 from app.connectors.csv_import import CsvImportError, build_duckdb_from_csvs
 from app.core.config import get_settings
 from app.core.crypto import decrypt_secret, encrypt_secret
-from app.db.models import CatalogTable, DataSource, KnowledgeChunk
+from app.db.models import CatalogTable, DataSource, KnowledgeChunk, User
 from app.schemas.datasource import SyncResult
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,7 @@ async def create_data_source(
     password: str | None = None,
     business_context: dict[str, Any] | None = None,
     sync: bool = True,
+    owner_id: uuid.UUID | None = None,
 ) -> DataSource:
     """Test, save, and (by default) discover the schema of a new data source.
 
@@ -86,6 +87,7 @@ async def create_data_source(
         encrypted_secret=encrypt_secret(password) if password else None,
         business_context=business_context or {},
         status="connected",
+        owner_id=owner_id,
     )
     session.add(source)
     await session.flush()
@@ -140,19 +142,44 @@ async def get_data_source(session: AsyncSession, data_source_id: uuid.UUID) -> D
     return source
 
 
-async def list_data_sources(session: AsyncSession) -> list[tuple[DataSource, int]]:
-    """Each source with its count of active tables."""
+async def get_accessible_source(
+    session: AsyncSession, user: User, data_source_id: uuid.UUID, *, write: bool = False
+) -> DataSource:
+    """The source, if this account may use it. Otherwise "not found".
+
+    Not "forbidden": a 403 would confirm that someone else's source exists at that id.
+    Reading is allowed for the owner and for shared sources (no owner); changing a shared
+    source is for administrators only.
+    """
+    source = await session.get(DataSource, data_source_id)
+    if source is None:
+        raise DataSourceNotFound(str(data_source_id))
+    owned = source.owner_id == user.id
+    can_read = owned or source.owner_id is None or user.is_admin
+    can_write = owned or user.is_admin
+    if not (can_write if write else can_read):
+        raise DataSourceNotFound(str(data_source_id))
+    return source
+
+
+async def list_data_sources(
+    session: AsyncSession, user: User | None = None
+) -> list[tuple[DataSource, int]]:
+    """Each source with its count of active tables. With a user, only what they can see."""
     counts = (
         select(CatalogTable.data_source_id, func.count().label("n"))
         .where(CatalogTable.is_active.is_(True))
         .group_by(CatalogTable.data_source_id)
         .subquery()
     )
-    rows = await session.execute(
+    query = (
         select(DataSource, func.coalesce(counts.c.n, 0))
         .outerjoin(counts, counts.c.data_source_id == DataSource.id)
         .order_by(DataSource.created_at)
     )
+    if user is not None:
+        query = query.where(or_(DataSource.owner_id == user.id, DataSource.owner_id.is_(None)))
+    rows = await session.execute(query)
     return [(source, int(count)) for source, count in rows.all()]
 
 
@@ -209,7 +236,11 @@ async def index_data_source(session: AsyncSession, data_source_id: uuid.UUID) ->
 
 
 async def create_csv_data_source(
-    session: AsyncSession, *, name: str, files: list[tuple[str, bytes]]
+    session: AsyncSession,
+    *,
+    name: str,
+    files: list[tuple[str, bytes]],
+    owner_id: uuid.UUID | None = None,
 ) -> DataSource:
     """Turn uploaded CSV files into a queryable data source.
 
@@ -257,6 +288,7 @@ async def create_csv_data_source(
         config={"path": str(target)},
         status="connected",
         business_context={},
+        owner_id=owner_id,
     )
     session.add(source)
     await session.flush()

@@ -19,11 +19,14 @@ SALES = b"region,amount,placed_on\nNorth,100.5,2026-01-02\nSouth,250,2026-01-03\
 
 
 @pytest.fixture
-async def api(source):
+async def api(source, account):
     service.embedding_override["provider"] = FakeEmbeddingProvider(EMBEDDING_DIM)
     transport = httpx.ASGITransport(app=create_app())
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", headers=account.headers
+    ) as client:
         client.source_id = str(source)  # type: ignore[attr-defined]
+        client.account = account  # type: ignore[attr-defined]
         yield client
     service.embedding_override["provider"] = None
 

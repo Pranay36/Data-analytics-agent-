@@ -25,9 +25,16 @@ from app.db.base import Base, TimestampMixin, uuid_pk
 
 class Analysis(Base, TimestampMixin):
     __tablename__ = "analyses"
-    __table_args__ = (Index("ix_analyses_created", "created_at"),)
+    __table_args__ = (
+        Index("ix_analyses_created", "created_at"),
+        Index("ix_analyses_user_created", "user_id", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    """Who asked. Every read path filters on this; it is the access boundary."""
     data_source_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("data_sources.id", ondelete="SET NULL"), nullable=True
     )

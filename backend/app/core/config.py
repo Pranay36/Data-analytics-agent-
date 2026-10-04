@@ -51,6 +51,28 @@ class Settings(BaseSettings):
     datasource_encryption_key: SecretStr = SecretStr("")
     """Fernet key for datasource passwords. Required outside `local`."""
 
+    # ── Authentication (see plans/AUTH_AND_USAGE.md) ─────────────────────────
+    auth_secret_key: SecretStr = SecretStr("")
+    """Signs JWTs. Generate with `openssl rand -hex 32`. Required: tokens signed with an
+    empty or guessable key can be forged by anyone."""
+    auth_access_token_minutes: int = 30
+    """Short on purpose: a stateless token cannot be withdrawn, so it must expire."""
+    auth_refresh_token_days: int = 14
+    auth_allow_registration: bool = True
+    auth_cookie_secure: bool = False
+    """True in any deployed environment: the refresh cookie then travels only over HTTPS."""
+    auth_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+    """"none" (with secure=True) when the frontend is served from another domain."""
+
+    quota_analyses_per_day: int = 20
+    quota_llm_calls_per_day: int = 150
+    quota_tokens_per_day: int = 1_000_000
+    """Per-account daily ceilings, on top of the per-analysis `CallBudget`."""
+
+    seed_admin_email: str = ""
+    seed_admin_password: SecretStr = SecretStr("")
+    """If both are set, startup creates this administrator when it does not exist."""
+
     # ── LLM providers (see PROJECT_PLAN §17.6) ───────────────────────────────
     llm_fallback_chain: Annotated[list[str], NoDecode] = []
     """Overrides `llm.chain` in models.yaml. Empty means use that file."""
@@ -160,6 +182,15 @@ class Settings(BaseSettings):
     @property
     def is_local(self) -> bool:
         return self.app_env == "local"
+
+    def require_auth_secret(self) -> str:
+        key = self.auth_secret_key.get_secret_value()
+        if len(key) < 32 or key.lower().startswith(("change", "secret", "your")):
+            raise RuntimeError(
+                "AUTH_SECRET_KEY is missing or too weak (need 32+ random characters). "
+                "Generate one with:  openssl rand -hex 32"
+            )
+        return key
 
     def require_database_url(self) -> str:
         if not self.database_url:

@@ -14,9 +14,17 @@ from app.db.base import Base, uuid_pk
 
 class LlmCall(Base):
     __tablename__ = "llm_calls"
-    __table_args__ = (Index("ix_llm_calls_analysis", "analysis_id"),)
+    __table_args__ = (
+        Index("ix_llm_calls_analysis", "analysis_id"),
+        Index("ix_llm_calls_user_created", "user_id", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    """Denormalised from the analysis: "what did this person spend" must not need a join,
+    and evaluation runs have calls with no analysis at all."""
     analysis_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("analyses.id", ondelete="CASCADE"), nullable=True
     )

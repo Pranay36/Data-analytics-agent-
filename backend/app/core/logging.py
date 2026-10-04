@@ -16,6 +16,7 @@ from contextvars import ContextVar
 from typing import Any
 
 _analysis_id: ContextVar[str | None] = ContextVar("analysis_id", default=None)
+_user_id: ContextVar[str | None] = ContextVar("user_id", default=None)
 
 # Attributes present on every LogRecord; anything else was passed via `extra=`
 # and is worth emitting as a structured field.
@@ -39,14 +40,20 @@ def get_analysis_id() -> str | None:
     return _analysis_id.get()
 
 
+def get_user_id() -> str | None:
+    return _user_id.get()
+
+
 @contextmanager
-def analysis_context(analysis_id: str):
-    """Bind `analysis_id` to every log line emitted inside this block."""
+def analysis_context(analysis_id: str, user_id: str | None = None):
+    """Bind `analysis_id` (and who asked) to every log line and LLM record in this block."""
     token = _analysis_id.set(analysis_id)
+    user_token = _user_id.set(user_id)
     try:
         yield
     finally:
         _analysis_id.reset(token)
+        _user_id.reset(user_token)
 
 
 def _redact(key: str, value: Any) -> Any:
@@ -64,6 +71,8 @@ class JsonFormatter(logging.Formatter):
 
         if (analysis_id := _analysis_id.get()) is not None:
             payload["analysis_id"] = analysis_id
+        if (user_id := _user_id.get()) is not None:
+            payload["user_id"] = user_id
 
         for key, value in record.__dict__.items():
             if key not in _STANDARD_ATTRS and not key.startswith("_"):

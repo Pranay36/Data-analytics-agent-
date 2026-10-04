@@ -26,7 +26,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.dashboard import DashboardSpec, hydrate
-from app.db.models import Analysis, AnalysisQuery, DataSource
+from app.db.models import Analysis, AnalysisQuery, DataSource, User
 from app.db.session import get_sessionmaker
 from app.schemas.analysis import (
     AnalysisOut,
@@ -35,6 +35,7 @@ from app.schemas.analysis import (
     StatsOut,
     StepOut,
 )
+from app.services import datasource_service as sources
 from app.services.analysis_runner import run_analysis
 
 logger = logging.getLogger(__name__)
@@ -69,13 +70,16 @@ def _semaphore() -> asyncio.Semaphore:
     return _slots
 
 
-async def _run(analysis_id: uuid.UUID, datasource_id: uuid.UUID, question: str) -> None:
+async def _run(
+    analysis_id: uuid.UUID, datasource_id: uuid.UUID, question: str, user_id: uuid.UUID
+) -> None:
     async with _semaphore():
         try:
             await run_analysis(
                 datasource_id,
                 question,
                 analysis_id=analysis_id,
+                user_id=user_id,
                 llm=overrides["llm"],
                 embeddings=overrides["embeddings"],
             )
@@ -84,17 +88,28 @@ async def _run(analysis_id: uuid.UUID, datasource_id: uuid.UUID, question: str) 
 
 
 async def start_analysis(
-    session: AsyncSession, datasource_id: uuid.UUID, question: str
+    session: AsyncSession, user: User, datasource_id: uuid.UUID, question: str
 ) -> Analysis:
-    """Create the run and return at once; the work continues in the background."""
-    if await session.get(DataSource, datasource_id) is None:
-        raise DataSourceMissing(str(datasource_id))
+    """Create the run and return at once; the work continues in the background.
 
-    analysis = Analysis(data_source_id=datasource_id, question=question.strip(), status="queued")
+    A source the account cannot see is reported as missing, the same as one that does not
+    exist: the two must be indistinguishable from outside.
+    """
+    try:
+        await sources.get_accessible_source(session, user, datasource_id)
+    except sources.DataSourceNotFound as exc:
+        raise DataSourceMissing(str(datasource_id)) from exc
+
+    analysis = Analysis(
+        user_id=user.id,
+        data_source_id=datasource_id,
+        question=question.strip(),
+        status="queued",
+    )
     session.add(analysis)
     await session.commit()
 
-    task = asyncio.create_task(_run(analysis.id, datasource_id, analysis.question))
+    task = asyncio.create_task(_run(analysis.id, datasource_id, analysis.question, user.id))
     _running.add(task)
     task.add_done_callback(_running.discard)
     return analysis
@@ -172,10 +187,14 @@ def _summary(analysis: Analysis, datasource_name: str | None) -> dict[str, Any]:
     }
 
 
-async def get_analysis(session: AsyncSession, analysis_id: uuid.UUID) -> AnalysisOut:
+async def get_analysis(
+    session: AsyncSession, user: User, analysis_id: uuid.UUID
+) -> AnalysisOut:
     analysis = await session.scalar(
         select(Analysis)
-        .where(Analysis.id == analysis_id)
+        # The ownership clause is the access boundary. Someone else's run is "missing",
+        # not "forbidden": a 403 would confirm it exists.
+        .where(Analysis.id == analysis_id, Analysis.user_id == user.id)
         .options(selectinload(Analysis.queries), selectinload(Analysis.dashboard))
     )
     if analysis is None:
@@ -232,6 +251,7 @@ async def get_analysis(session: AsyncSession, analysis_id: uuid.UUID) -> Analysi
 
 async def list_analyses(
     session: AsyncSession,
+    user: User,
     *,
     limit: int = 25,
     offset: int = 0,
@@ -240,6 +260,7 @@ async def list_analyses(
     query = (
         select(Analysis, DataSource.name)
         .outerjoin(DataSource, DataSource.id == Analysis.data_source_id)
+        .where(Analysis.user_id == user.id)
         .order_by(Analysis.created_at.desc())
         .limit(limit)
         .offset(offset)

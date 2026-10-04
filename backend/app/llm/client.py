@@ -29,7 +29,7 @@ from typing import TypeVar
 from pydantic import BaseModel
 
 from app.core.config import Settings, get_settings
-from app.core.logging import get_analysis_id
+from app.core.logging import get_analysis_id, get_user_id
 from app.llm.base import LLMProvider
 from app.llm.budget import BudgetExceeded, CallBudget
 from app.llm.cache import ResponseCache, cache_key
@@ -355,7 +355,8 @@ class LLMClient:
             return
         await self._recorder.record(
             CallRecord(
-                analysis_id=get_analysis_id(), agent=ctx.agent, provider=ctx.entry.provider,
+                analysis_id=get_analysis_id(), user_id=get_user_id(),
+                agent=ctx.agent, provider=ctx.entry.provider,
                 model=response.model, strategy=ctx.strategy, attempt=attempt,
                 fallback_index=ctx.index, usage=response.usage, latency_ms=response.latency_ms,
                 success=success, structured_output_valid=valid, cached=cached,
@@ -368,7 +369,8 @@ class LLMClient:
             return
         await self._recorder.record(
             CallRecord(
-                analysis_id=get_analysis_id(), agent=ctx.agent, provider=ctx.entry.provider,
+                analysis_id=get_analysis_id(), user_id=get_user_id(),
+                agent=ctx.agent, provider=ctx.entry.provider,
                 model=ctx.entry.model, strategy=ctx.strategy, attempt=attempt,
                 fallback_index=ctx.index, success=False,
                 error_type=type(exc).__name__, error_message=exc.message,

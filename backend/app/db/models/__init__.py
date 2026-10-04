@@ -10,6 +10,7 @@ from app.db.models.datasource import DataSource
 from app.db.models.evaluation import EvaluationRun
 from app.db.models.knowledge import EMBEDDING_DIM, KnowledgeChunk
 from app.db.models.telemetry import LlmCall
+from app.db.models.user import RefreshToken, User, normalise_email
 
 __all__ = [
     "EMBEDDING_DIM",
@@ -21,6 +22,9 @@ __all__ = [
     "DataSource",
     "EvaluationRun",
     "KnowledgeChunk",
+    "RefreshToken",
     "LlmCall",
     "TableRelationship",
+    "User",
+    "normalise_email",
 ]

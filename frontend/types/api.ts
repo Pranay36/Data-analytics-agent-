@@ -198,3 +198,32 @@ export interface Analysis extends AnalysisSummary {
   };
   error: { code: string; message: string } | null;
 }
+
+export interface User {
+  id: string;
+  email: string;
+  full_name: string | null;
+  is_admin: boolean;
+  created_at: string;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  user: User;
+}
+
+export interface Usage {
+  analyses: number;
+  llm_calls: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+export interface Me {
+  user: User;
+  usage_today: Usage;
+  limits: { analyses_per_day: number; llm_calls_per_day: number; tokens_per_day: number };
+  resets_at: string;
+}

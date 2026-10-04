@@ -6,8 +6,8 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import DateTime, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, uuid_pk
@@ -20,6 +20,11 @@ class DataSource(Base, TimestampMixin):
     __tablename__ = "data_sources"
 
     id: Mapped[uuid.UUID] = uuid_pk()
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    """NULL means a shared source: every account may query it, only an admin may change it.
+    The seeded demo database is one."""
     name: Mapped[str] = mapped_column(String(120), unique=True)
     type: Mapped[str] = mapped_column(String(32))
     """postgres | clickhouse | csv | duckdb"""

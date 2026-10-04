@@ -1,8 +1,10 @@
 import type {
   Analysis,
   AnalysisSummary,
+  AuthResponse,
   ConnectionTest,
   DataSource,
+  Me,
   Schema,
 } from "@/types/api";
 
@@ -29,13 +31,66 @@ function describe(detail: unknown): string {
   return "Something went wrong.";
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+// ── Session ──────────────────────────────────────────────────────────────────
+// The access token lives here, in memory only. Nothing script-readable survives a page
+// close, so an XSS cannot lift a long-lived credential out of storage; the refresh token
+// is an httpOnly cookie the page never sees at all.
+let accessToken: string | null = null;
+let onSessionLost: (() => void) | null = null;
+
+export const session = {
+  set: (token: string | null) => {
+    accessToken = token;
+  },
+  /** Called when a request is refused and the session cannot be renewed. */
+  onLost: (callback: (() => void) | null) => {
+    onSessionLost = callback;
+  },
+};
+
+let refreshing: Promise<AuthResponse | null> | null = null;
+
+/**
+ * Trade the refresh cookie for a new access token.
+ *
+ * One call at a time: a page polling three endpoints that all get a 401 together must not
+ * start three refreshes, because the refresh token is single-use and only the first would
+ * win. Everyone shares the one in flight.
+ */
+export function refreshSession(): Promise<AuthResponse | null> {
+  refreshing ??= fetch(`${BASE}/auth/refresh`, { method: "POST", credentials: "include" })
+    .then(async (response) => {
+      if (!response.ok) return null;
+      const body = (await response.json()) as AuthResponse;
+      accessToken = body.access_token;
+      return body;
+    })
+    .catch(() => null)
+    .finally(() => {
+      refreshing = null;
+    });
+  return refreshing;
+}
+
+// Calls that establish or end a session must not themselves trigger a refresh-and-retry.
+const NO_REFRESH = ["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout"];
+
+async function request<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+
   let response: Response;
   try {
-    response = await fetch(`${BASE}${path}`, init);
+    response = await fetch(`${BASE}${path}`, { ...init, headers, credentials: "include" });
   } catch {
     // The server is down or unreachable: say so, rather than surfacing "Failed to fetch".
     throw new ApiError(0, `Cannot reach the server at ${API_URL}. Is the backend running?`);
+  }
+
+  if (response.status === 401 && !retried && !NO_REFRESH.includes(path)) {
+    if (await refreshSession()) return request<T>(path, init, true);
+    accessToken = null;
+    onSessionLost?.();
   }
 
   if (!response.ok) {
@@ -57,6 +112,15 @@ const json = (body: unknown): RequestInit => ({
 });
 
 export const api = {
+  register: (email: string, password: string, full_name?: string) =>
+    request<AuthResponse>("/auth/register", json({ email, password, full_name })),
+  login: (email: string, password: string) =>
+    request<AuthResponse>("/auth/login", json({ email, password })),
+  logout: () => request<void>("/auth/logout", { method: "POST" }),
+  me: () => request<Me>("/auth/me"),
+  changePassword: (current_password: string, new_password: string) =>
+    request<void>("/auth/change-password", json({ current_password, new_password })),
+
   listDatasources: () => request<DataSource[]>("/datasources"),
   getSchema: (id: string) => request<Schema>(`/datasources/${id}/schema`),
   getExamples: (id: string) => request<string[]>(`/datasources/${id}/examples`),

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import ActiveUser, get_active_user
 from app.connectors import ConnectionFailed, ConnectionTestResult, ConnectorError
 from app.core.crypto import CryptoError
 from app.db.models import DataSource, TableRelationship
@@ -24,7 +25,9 @@ from app.schemas.datasource import (
 )
 from app.services import datasource_service as service
 
-router = APIRouter(prefix="/datasources", tags=["datasources"])
+router = APIRouter(
+    prefix="/datasources", tags=["datasources"], dependencies=[Depends(get_active_user)]
+)
 
 
 def _out(source: DataSource, table_count: int = 0) -> DataSourceOut:
@@ -55,7 +58,7 @@ async def test_connection(body: ConnectionTestRequest) -> ConnectionTestResult:
 
 @router.post("", response_model=DataSourceOut, status_code=status.HTTP_201_CREATED)
 async def create_data_source(
-    body: DataSourceCreate, session: AsyncSession = Depends(get_session)
+    body: DataSourceCreate, user: ActiveUser, session: AsyncSession = Depends(get_session)
 ) -> DataSourceOut:
     try:
         source = await service.create_data_source(
@@ -65,6 +68,7 @@ async def create_data_source(
             config=body.config.model_dump(),
             password=_secret(body.password),
             business_context=body.business_context,
+            owner_id=user.id,
         )
         await service.index_data_source(session, source.id)
         await session.commit()
@@ -81,14 +85,19 @@ async def create_data_source(
 
 @router.post("/csv", response_model=DataSourceOut, status_code=status.HTTP_201_CREATED)
 async def upload_csv(
+    *,
     name: str = Form(min_length=1, max_length=120),
     files: list[UploadFile] = File(...),
+    user: ActiveUser,
     session: AsyncSession = Depends(get_session),
 ) -> DataSourceOut:
     """Create a data source from one or more CSV files."""
     try:
         source = await service.create_csv_data_source(
-            session, name=name, files=[(f.filename or "data.csv", await f.read()) for f in files]
+            session,
+            name=name,
+            files=[(f.filename or "data.csv", await f.read()) for f in files],
+            owner_id=user.id,
         )
         await service.index_data_source(session, source.id)
         await session.commit()
@@ -101,16 +110,18 @@ async def upload_csv(
 
 
 @router.get("", response_model=list[DataSourceOut])
-async def list_data_sources(session: AsyncSession = Depends(get_session)) -> list[DataSourceOut]:
-    return [_out(source, count) for source, count in await service.list_data_sources(session)]
+async def list_data_sources(
+    user: ActiveUser, session: AsyncSession = Depends(get_session)
+) -> list[DataSourceOut]:
+    return [_out(source, count) for source, count in await service.list_data_sources(session, user)]
 
 
 @router.get("/{data_source_id}", response_model=DataSourceOut)
 async def get_data_source(
-    data_source_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+    data_source_id: uuid.UUID, user: ActiveUser, session: AsyncSession = Depends(get_session)
 ) -> DataSourceOut:
     try:
-        source = await service.get_data_source(session, data_source_id)
+        source = await service.get_accessible_source(session, user, data_source_id)
     except service.DataSourceNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Data source not found.") from exc
     return _out(source, len(await service.get_schema(session, data_source_id)))
@@ -118,9 +129,10 @@ async def get_data_source(
 
 @router.delete("/{data_source_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_data_source(
-    data_source_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+    data_source_id: uuid.UUID, user: ActiveUser, session: AsyncSession = Depends(get_session)
 ) -> None:
     try:
+        await service.get_accessible_source(session, user, data_source_id, write=True)
         await service.delete_data_source(session, data_source_id)
         await session.commit()
     except service.DataSourceNotFound as exc:
@@ -129,10 +141,11 @@ async def delete_data_source(
 
 @router.get("/{data_source_id}/examples", response_model=list[str])
 async def get_examples(
-    data_source_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+    data_source_id: uuid.UUID, user: ActiveUser, session: AsyncSession = Depends(get_session)
 ) -> list[str]:
     """Verified example questions for this source, to suggest in the UI."""
     try:
+        await service.get_accessible_source(session, user, data_source_id)
         return await service.example_questions(session, data_source_id)
     except service.DataSourceNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Data source not found.") from exc
@@ -140,9 +153,10 @@ async def get_examples(
 
 @router.post("/{data_source_id}/sync", response_model=SyncResult)
 async def sync_data_source(
-    data_source_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+    data_source_id: uuid.UUID, user: ActiveUser, session: AsyncSession = Depends(get_session)
 ) -> SyncResult:
     try:
+        await service.get_accessible_source(session, user, data_source_id, write=True)
         result = await service.sync_data_source(session, data_source_id)
         await service.index_data_source(session, data_source_id)
         await session.commit()
@@ -156,9 +170,10 @@ async def sync_data_source(
 
 @router.get("/{data_source_id}/schema", response_model=SchemaOut)
 async def get_schema(
-    data_source_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+    data_source_id: uuid.UUID, user: ActiveUser, session: AsyncSession = Depends(get_session)
 ) -> SchemaOut:
     try:
+        await service.get_accessible_source(session, user, data_source_id)
         tables = await service.get_schema(session, data_source_id)
     except service.DataSourceNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Data source not found.") from exc

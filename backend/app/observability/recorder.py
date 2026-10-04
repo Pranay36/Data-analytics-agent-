@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 class CallRecord(BaseModel):
     analysis_id: str | None = None
+    user_id: str | None = None
     agent: str
     provider: str
     model: str
@@ -48,6 +49,7 @@ class DbLlmCallRecorder:
                 session.add(
                     LlmCall(
                         analysis_id=uuid.UUID(record.analysis_id) if record.analysis_id else None,
+                        user_id=uuid.UUID(record.user_id) if record.user_id else None,
                         agent=record.agent,
                         provider=record.provider,
                         model=record.model,

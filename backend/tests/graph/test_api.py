@@ -27,12 +27,15 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-async def api(source):
+async def api(source, account):
     """A client for the real app, with the model replaced by a scripted one per test."""
     analysis_service.overrides["embeddings"] = EMBEDDINGS
     transport = httpx.ASGITransport(app=create_app())
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", headers=account.headers
+    ) as client:
         client.source_id = str(source)  # type: ignore[attr-defined]
+        client.account = account  # type: ignore[attr-defined]
         yield client
     analysis_service.overrides.update(llm=None, embeddings=None)
 
@@ -223,11 +226,16 @@ async def test_history_can_be_filtered_and_paged(api) -> None:
 
 
 # ── Interrupted runs ─────────────────────────────────────────────────────────
-async def test_a_run_interrupted_by_a_restart_is_marked_failed(source) -> None:
+async def test_a_run_interrupted_by_a_restart_is_marked_failed(source, account) -> None:
     """Otherwise it would sit at "running" for ever and a polling client would wait on it."""
     async with get_sessionmaker()() as session:
-        stuck = Analysis(data_source_id=source, question="stuck?", status="running", stage="analyzing")
-        done = Analysis(data_source_id=source, question="done?", status="completed")
+        stuck = Analysis(
+            user_id=account.id, data_source_id=source, question="stuck?",
+            status="running", stage="analyzing",
+        )
+        done = Analysis(
+            user_id=account.id, data_source_id=source, question="done?", status="completed"
+        )
         session.add_all([stuck, done])
         await session.commit()
         stuck_id, done_id = stuck.id, done.id

@@ -7,6 +7,8 @@ import time
 import uuid
 from dataclasses import dataclass
 
+from sqlalchemy import select
+
 from app.core.config import Settings, get_settings
 from app.core.logging import analysis_context
 from app.db.models import Analysis
@@ -15,6 +17,7 @@ from app.graph import RECURSION_LIMIT, AnalysisState, GraphDeps, build_graph
 from app.graph.persistence import finish_analysis
 from app.llm import CallBudget, LLMClient
 from app.rag import build_embedding_provider
+from app.services import auth_service
 from app.services import datasource_service as sources
 
 logger = logging.getLogger(__name__)
@@ -29,12 +32,36 @@ class RunResult:
     tokens: int
 
 
-async def create_analysis(datasource_id: uuid.UUID, question: str) -> uuid.UUID:
+async def create_analysis(
+    datasource_id: uuid.UUID, question: str, user_id: uuid.UUID
+) -> uuid.UUID:
     async with get_sessionmaker()() as session:
-        analysis = Analysis(data_source_id=datasource_id, question=question, status="queued")
+        analysis = Analysis(
+            data_source_id=datasource_id, question=question, status="queued", user_id=user_id
+        )
         session.add(analysis)
         await session.commit()
         return analysis.id
+
+
+async def _owner(
+    analysis_id: uuid.UUID | None, user_id: uuid.UUID | None
+) -> uuid.UUID:
+    """Who a run is charged to.
+
+    A person's run arrives with `user_id`. Work nobody started (evaluation, the command-line
+    tools) is charged to the system account, so it never eats into a real person's quota.
+    """
+    if user_id is not None:
+        return user_id
+    async with get_sessionmaker()() as session:
+        if analysis_id is not None:
+            owner = await session.scalar(select(Analysis.user_id).where(Analysis.id == analysis_id))
+            if owner is not None:
+                return owner
+        system = await auth_service.ensure_system_user(session)
+        await session.commit()
+        return system.id
 
 
 async def run_analysis(
@@ -42,6 +69,7 @@ async def run_analysis(
     question: str,
     *,
     analysis_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
     settings: Settings | None = None,
     llm: LLMClient | None = None,
     embeddings=None,
@@ -58,7 +86,8 @@ async def run_analysis(
     # turn an unknown id into an opaque foreign-key error instead of "not found".
     async with sessionmaker() as session:
         source = await sources.get_data_source(session, datasource_id)
-    analysis_id = analysis_id or await create_analysis(datasource_id, question)
+    user_id = await _owner(analysis_id, user_id)
+    analysis_id = analysis_id or await create_analysis(datasource_id, question, user_id)
     started = time.perf_counter()
 
     async with sources.open_connector(source) as connector:
@@ -74,7 +103,7 @@ async def run_analysis(
             ),
         )
 
-        with analysis_context(str(analysis_id)):
+        with analysis_context(str(analysis_id), str(user_id)):
             try:
                 state = await build_graph(deps).ainvoke(
                     {
