@@ -136,6 +136,30 @@ data. No model grades another model: every check is code.
 A report is written to `reports/` and each run is stored with the configuration that
 produced it.
 
+## API
+
+Starting an analysis returns immediately; the run continues in the background and writes
+its progress to the database, so a client polls and a page refresh loses nothing.
+
+```bash
+curl -X POST localhost:8000/api/v1/analyses -H 'content-type: application/json' \
+  -d '{"datasource_id": "<id>", "question": "Why did revenue fall in June 2026?"}'
+# 202 {"id": "...", "status": "queued"}
+
+curl localhost:8000/api/v1/analyses/<id>
+# {"status": "running", "stage": "analyzing", ...}  ->  {"status": "completed", "dashboard": {...}}
+```
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/v1/analyses` | start a run (202) |
+| `GET /api/v1/analyses/{id}` | progress, then the result, steps taken and dashboard |
+| `GET /api/v1/analyses` | history, newest first |
+| `POST /api/v1/datasources/csv` | create a source from uploaded CSV files |
+| `GET /api/v1/datasources/{id}/examples` | suggested questions |
+
+Interactive docs: `localhost:8000/docs`.
+
 ## Choosing models
 
 Models and providers live in [`backend/models.yaml`](backend/models.yaml) — which

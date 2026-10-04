@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,16 +66,38 @@ async def create_data_source(
             password=_secret(body.password),
             business_context=body.business_context,
         )
+        await service.index_data_source(session, source.id)
         await session.commit()
     except service.DataSourceNameTaken as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except ConnectionFailed as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, exc.message) from exc
+        raise HTTPException(422, exc.message) from exc
     except CryptoError as exc:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from exc
 
     tables = await service.get_schema(session, source.id)
     return _out(source, len(tables))
+
+
+@router.post("/csv", response_model=DataSourceOut, status_code=status.HTTP_201_CREATED)
+async def upload_csv(
+    name: str = Form(min_length=1, max_length=120),
+    files: list[UploadFile] = File(...),
+    session: AsyncSession = Depends(get_session),
+) -> DataSourceOut:
+    """Create a data source from one or more CSV files."""
+    try:
+        source = await service.create_csv_data_source(
+            session, name=name, files=[(f.filename or "data.csv", await f.read()) for f in files]
+        )
+        await service.index_data_source(session, source.id)
+        await session.commit()
+    except service.DataSourceNameTaken as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except service.InvalidUpload as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    return _out(source, len(await service.get_schema(session, source.id)))
 
 
 @router.get("", response_model=list[DataSourceOut])
@@ -105,12 +127,24 @@ async def delete_data_source(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Data source not found.") from exc
 
 
+@router.get("/{data_source_id}/examples", response_model=list[str])
+async def get_examples(
+    data_source_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+) -> list[str]:
+    """Verified example questions for this source, to suggest in the UI."""
+    try:
+        return await service.example_questions(session, data_source_id)
+    except service.DataSourceNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Data source not found.") from exc
+
+
 @router.post("/{data_source_id}/sync", response_model=SyncResult)
 async def sync_data_source(
     data_source_id: uuid.UUID, session: AsyncSession = Depends(get_session)
 ) -> SyncResult:
     try:
         result = await service.sync_data_source(session, data_source_id)
+        await service.index_data_source(session, data_source_id)
         await session.commit()
         return result
     except service.DataSourceNotFound as exc:
