@@ -155,7 +155,6 @@ function LineView({ data, area }: { data: ChartData; area: boolean }) {
         {data.seriesKeys.map((key, i) => {
           const colour = SERIES_COLORS[i % SERIES_COLORS.length];
           const shared = {
-            key,
             dataKey: key,
             stroke: colour,
             strokeWidth: 2,
@@ -166,9 +165,9 @@ function LineView({ data, area }: { data: ChartData; area: boolean }) {
             activeDot: { r: 5, fill: colour, stroke: SURFACE, strokeWidth: 2 },
           };
           return area ? (
-            <Area {...shared} type="monotone" fill={colour} fillOpacity={0.14} />
+            <Area key={key} {...shared} type="monotone" fill={colour} fillOpacity={0.14} />
           ) : (
-            <Line {...shared} type="monotone" />
+            <Line key={key} {...shared} type="monotone" />
           );
         })}
       </Chart>

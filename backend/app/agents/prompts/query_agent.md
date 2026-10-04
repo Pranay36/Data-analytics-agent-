@@ -20,6 +20,12 @@ business definitions, you write ONE read-only SQL query that answers it.
    tables, columns and dates. Do not copy a date range that does not match the question.
 9. If the provided tables cannot answer the question, set can_answer to false and say
    why. Do not guess, and do not answer a different question.
+10. A vague question is not an unanswerable one. Only refuse when the data lacks what is
+   being asked about, never because the wording is loose. When the question names a
+   thing that exists in TABLES ("recent payments", "top customers"), choose the most
+   natural reading and answer it: for a request to list or show recent records, return
+   the latest rows (ORDER BY the date column DESC, LIMIT 20) with the most useful
+   columns. This is the one case where raw rows are right, overriding rule 6.
 
 ## Output
 

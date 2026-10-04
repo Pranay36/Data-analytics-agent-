@@ -67,7 +67,7 @@ export function AnalysisResult({ id }: { id: string }) {
 
       {analysis.status === "completed" && analysis.stop_reason === "cannot_answer" && (
         <Notice title="This data can't answer that question">
-          {analysis.findings?.summary ?? "The question refers to something not present in the data source."}
+          {analysis.error?.message ?? analysis.findings?.summary ?? "The data source does not contain what the question asks about."}
         </Notice>
       )}
 
