@@ -10,7 +10,12 @@ be read in one place:
                           |                                          analysis_agent
                           |                                                 |
                           +------------- approved ---------- plan_drilldown-+
-                                                                    |  refused / done
+                                                                    | refused / done
+                                                                    v
+                                                           visualization_agent
+                                                                    |
+                                                             build_dashboard
+                                                                    |
                                                                     v
                                                                 finalize
 
@@ -29,6 +34,7 @@ from app.graph import routing
 from app.graph.deps import GraphDeps
 from app.graph.nodes import (
     analysis_agent,
+    build_dashboard,
     execute_sql,
     finalize,
     load_context,
@@ -36,6 +42,7 @@ from app.graph.nodes import (
     query_agent,
     retrieve_context,
     validate_sql_node,
+    visualization_agent,
 )
 from app.graph.state import AnalysisState
 
@@ -62,6 +69,8 @@ def build_graph(deps: GraphDeps):
     graph.add_node("execute_sql", bind(execute_sql))
     graph.add_node("analysis_agent", bind(analysis_agent))
     graph.add_node("plan_drilldown", bind(plan_drilldown))
+    graph.add_node("visualization_agent", bind(visualization_agent))
+    graph.add_node("build_dashboard", bind(build_dashboard))
     graph.add_node("finalize", bind(finalize))
 
     graph.add_edge(START, "load_context")
@@ -76,6 +85,8 @@ def build_graph(deps: GraphDeps):
     )
     graph.add_conditional_edges("analysis_agent", routing.after_analysis)
     graph.add_conditional_edges("plan_drilldown", routing.after_plan)
+    graph.add_edge("visualization_agent", "build_dashboard")
+    graph.add_edge("build_dashboard", "finalize")
     graph.add_edge("finalize", END)
 
     return graph.compile()

@@ -141,7 +141,8 @@ async def execute_sql(state: AnalysisState, deps: GraphDeps) -> AnalysisState:
     # Statistics are computed here, deterministically, so the Analysis Agent is handed
     # facts to interpret rather than sums to perform.
     profile = profile_result(
-        result.column_names, result.rows,
+        result.column_names,
+        result.rows,
         materiality_pct=deps.settings.drilldown_materiality_pct,
     )
     drill = state.get("drill")
@@ -165,7 +166,9 @@ async def execute_sql(state: AnalysisState, deps: GraphDeps) -> AnalysisState:
         if parent is not None:
             focus = drill.focus_filter if drill.focus_filter else {}
             check = reconcile(
-                profile, parent, focus,
+                profile,
+                parent,
+                focus,
                 tolerance_pct=deps.settings.drilldown_reconcile_tolerance_pct,
             )
             if not check.ok:

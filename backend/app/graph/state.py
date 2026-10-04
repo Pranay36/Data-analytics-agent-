@@ -22,6 +22,7 @@ from app.agents.schemas import (
     DrillDownRequest,
     QueryAgentOutput,
 )
+from app.dashboard import DashboardSpec
 from app.graph.drilldown import DimensionInfo
 from app.rag import RetrievedContext
 from app.sql_guard import ValidationResult
@@ -126,6 +127,14 @@ class AnalysisState(TypedDict, total=False):
     # ── Established by the first query, then held fixed ──────────────────────
     question_type: str | None
     frame: AnalysisFrame | None
+
+    # ── Dashboard ────────────────────────────────────────────────────────────
+    dashboard_draft: DashboardSpec | None
+    """What the Visualization Agent proposed, before validation."""
+    dashboard: DashboardSpec | None
+    dashboard_source: Literal["llm", "fallback"] | None
+    dashboard_dropped: list[str]
+    """Why widgets were dropped or changed. Kept for diagnosis, not shown to users."""
 
     # ── Outcome ──────────────────────────────────────────────────────────────
     stop_reason: StopReason | None

@@ -33,6 +33,10 @@ async def source(monkeypatch):
     if not get_settings().database_url:
         pytest.skip("DATABASE_URL not set")
     monkeypatch.setenv("DATASOURCE_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    # The workflow tests script the Query and Analysis agents. The Visualization Agent is
+    # off here so they need not also script a dashboard reply; the rule-built dashboard
+    # still runs, and test_dashboard_workflow turns the agent on.
+    monkeypatch.setenv("VIZ_AGENT_ENABLED", "false")
     get_settings.cache_clear()
 
     maker = get_sessionmaker()

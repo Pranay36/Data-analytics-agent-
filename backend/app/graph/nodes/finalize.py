@@ -34,9 +34,11 @@ async def finalize(state: AnalysisState, deps: GraphDeps) -> AnalysisState:
             # worked. Those findings stand, so report what was found and say where
             # the investigation stopped rather than failing the whole analysis.
             stop_reason = "inconclusive"
-            notes = [*state.get("notes", []),
-                     "A deeper breakdown could not be verified, so the investigation "
-                     "stopped at the previous level."]
+            notes = [
+                *state.get("notes", []),
+                "A deeper breakdown could not be verified, so the investigation "
+                "stopped at the previous level.",
+            ]
             state = {**state, "notes": notes}  # type: ignore[assignment]
         elif last is not None and last.status == "rejected":
             stop_reason = "invalid_sql"
@@ -57,7 +59,7 @@ async def finalize(state: AnalysisState, deps: GraphDeps) -> AnalysisState:
     completed = stop_reason in _COMPLETED or (stop_reason in _COMPLETED_IF_DATA and has_data)
 
     findings = None
-    if (rounds := state.get("analysis_rounds")) :
+    if rounds := state.get("analysis_rounds"):
         findings = rounds[-1].model_dump(mode="json")
         findings["caveats"] = [*findings.get("caveats", []), *state.get("notes", [])]
         findings["rounds"] = len(rounds)

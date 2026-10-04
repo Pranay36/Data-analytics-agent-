@@ -54,7 +54,9 @@ llm:
     # took nearly four minutes of rate-limit waiting. Gemini has its own quota.
     # `-latest` aliases are used because dated Gemini models are withdrawn without notice.
     analysis: gemini:gemini-flash-lite-latest
-    visualization: null
+    # Presenting results is the lightest of the three jobs, and it shares the analyst's
+    # separate Gemini quota rather than the Groq tokens-per-minute the Query Agent needs.
+    visualization: gemini:gemini-flash-lite-latest
 
   # How to ask each model for machine-readable output, in order of preference.
   # Measured, not assumed: a probe asked each model to write a query in each

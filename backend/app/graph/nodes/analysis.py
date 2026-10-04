@@ -59,8 +59,13 @@ async def analysis_agent(state: AnalysisState, deps: GraphDeps) -> AnalysisState
         frame=state.get("frame"),
         queries=[
             QuerySummary(
-                seq=q.seq, step_question=q.step_question, explanation=q.explanation,
-                columns=q.columns, rows=q.rows, profile=_profile(q), filters=q.filters,
+                seq=q.seq,
+                step_question=q.step_question,
+                explanation=q.explanation,
+                columns=q.columns,
+                rows=q.rows,
+                profile=_profile(q),
+                filters=q.filters,
                 dimension=q.dimension,
             )
             for q in queries
@@ -82,7 +87,9 @@ async def analysis_agent(state: AnalysisState, deps: GraphDeps) -> AnalysisState
         return {
             "analysis_rounds": [
                 fallback_findings(
-                    _profile(last), seq=last.seq, frame=state.get("frame"),
+                    _profile(last),
+                    seq=last.seq,
+                    frame=state.get("frame"),
                     reason="automatic summary because the analysis model was unavailable",
                     filters=last.filters,
                 )
@@ -130,8 +137,10 @@ async def plan_drilldown(state: AnalysisState, deps: GraphDeps) -> AnalysisState
         focus = {last.dimension: str(drafted.focus_value)}
 
     proposal = DrillDownRequest(
-        dimension=drafted.dimension, focus_filter=focus,
-        step_question=drafted.step_question, rationale=drafted.rationale,
+        dimension=drafted.dimension,
+        focus_filter=focus,
+        step_question=drafted.step_question,
+        rationale=drafted.rationale,
     )
 
     context = DrillContext(
@@ -166,8 +175,11 @@ async def plan_drilldown(state: AnalysisState, deps: GraphDeps) -> AnalysisState
 
     logger.info(
         "drill-down approved",
-        extra={"dimension": proposal.dimension, "focus": proposal.focus_filter,
-               "depth": state.get("drilldown_depth", 0) + 1},
+        extra={
+            "dimension": proposal.dimension,
+            "focus": proposal.focus_filter,
+            "depth": state.get("drilldown_depth", 0) + 1,
+        },
     )
     filters = state.get("filter_path", [])
     return {

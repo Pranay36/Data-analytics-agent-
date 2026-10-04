@@ -92,19 +92,23 @@ def check_drilldown(request: DrillDownRequest, ctx: DrillContext) -> Verdict:
 
     if ctx.depth >= ctx.max_depth:
         return Verdict(
-            False, f"maximum depth of {ctx.max_depth} reached", stop_reason="max_depth",
+            False,
+            f"maximum depth of {ctx.max_depth} reached",
+            stop_reason="max_depth",
             note=f"The investigation stopped at the maximum depth of {ctx.max_depth} levels.",
         )
 
     if ctx.remaining_calls - ctx.reserve_calls < CALLS_PER_LEVEL:
         return Verdict(
-            False, "not enough model calls left for another level",
+            False,
+            "not enough model calls left for another level",
             stop_reason="budget_exhausted",
             note="The investigation stopped early because the model-call budget was used up.",
         )
     if ctx.remaining_tokens < MIN_TOKENS_PER_LEVEL:
         return Verdict(
-            False, "not enough token budget left for another level",
+            False,
+            "not enough token budget left for another level",
             stop_reason="budget_exhausted",
             note="The investigation stopped early because the token budget was used up.",
         )

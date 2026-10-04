@@ -75,8 +75,10 @@ def reconcile(
     actual_previous = child.comparison.total_previous
     actual_current = child.comparison.total_current
 
-    if not (_off(actual_previous, expected_previous, tolerance)
-            or _off(actual_current, expected_current, tolerance)):
+    if not (
+        _off(actual_previous, expected_previous, tolerance)
+        or _off(actual_current, expected_current, tolerance)
+    ):
         return Reconciliation(True)
 
     return Reconciliation(

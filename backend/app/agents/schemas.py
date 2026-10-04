@@ -52,9 +52,7 @@ class AnalysisFrame(BaseModel):
 class QueryAgentOutput(BaseModel):
     """A SQL query answering the question, or a refusal."""
 
-    can_answer: bool = Field(
-        description="False if the provided tables cannot answer the question."
-    )
+    can_answer: bool = Field(description="False if the provided tables cannot answer the question.")
     cannot_answer_reason: str | None = Field(
         default=None, description="Why not, in one sentence. Required when can_answer is false."
     )

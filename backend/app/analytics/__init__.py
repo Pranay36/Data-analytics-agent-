@@ -1,5 +1,6 @@
 """Deterministic analysis of query results."""
 
+from app.analytics.grounding import Grounding, check_grounding, extract_numbers
 from app.analytics.profiler import (
     ComparisonProfile,
     ResultProfile,
@@ -12,6 +13,9 @@ from app.analytics.profiler import (
 
 __all__ = [
     "ComparisonProfile",
+    "Grounding",
+    "check_grounding",
+    "extract_numbers",
     "ResultProfile",
     "SegmentChange",
     "TimeSeriesProfile",

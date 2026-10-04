@@ -102,8 +102,7 @@ def build_messages(request: AnalysisRequest) -> list[ChatMessage]:
         periods = ""
         if frame.current_period and frame.comparison_period:
             periods = (
-                f"  Comparing {frame.current_period.label} against "
-                f"{frame.comparison_period.label}."
+                f"  Comparing {frame.current_period.label} against {frame.comparison_period.label}."
             )
         parts.append(f"Metric: {frame.metric_name}.{periods}")
         if warning := period_length_warning(frame):

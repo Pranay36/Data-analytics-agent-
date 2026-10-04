@@ -30,8 +30,11 @@ async def query_agent(state: AnalysisState, deps: GraphDeps) -> AnalysisState:
     drill = state.get("drill") if state["mode"] == "drilldown" else None
     if drill is not None:
         parent = next(
-            (q for q in reversed(state.get("queries", []))
-             if q.status == "succeeded" and q.profile),
+            (
+                q
+                for q in reversed(state.get("queries", []))
+                if q.status == "succeeded" and q.profile
+            ),
             None,
         )
         comparison = ResultProfile.model_validate(parent.profile).comparison if parent else None

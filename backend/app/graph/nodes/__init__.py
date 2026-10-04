@@ -5,9 +5,11 @@ from app.graph.nodes.context import load_context, retrieve_context
 from app.graph.nodes.finalize import finalize
 from app.graph.nodes.query import query_agent
 from app.graph.nodes.sql import execute_sql, validate_sql_node
+from app.graph.nodes.visualize import build_dashboard, visualization_agent
 
 __all__ = [
     "analysis_agent",
+    "build_dashboard",
     "execute_sql",
     "finalize",
     "load_context",
@@ -15,4 +17,5 @@ __all__ = [
     "query_agent",
     "retrieve_context",
     "validate_sql_node",
+    "visualization_agent",
 ]

@@ -14,7 +14,8 @@ from typing import Any
 
 from sqlalchemy import update
 
-from app.db.models import Analysis, AnalysisQuery
+from app.dashboard import DashboardSpec
+from app.db.models import Analysis, AnalysisQuery, Dashboard
 from app.graph.deps import GraphDeps
 from app.graph.state import ExecutedQuery
 
@@ -73,9 +74,7 @@ async def save_query(deps: GraphDeps, analysis_id: str | None, query: ExecutedQu
         logger.warning("could not record query", extra={"seq": query.seq, "error": str(exc)})
 
 
-async def finish_analysis(
-    deps: GraphDeps, analysis_id: str | None, values: dict[str, Any]
-) -> None:
+async def finish_analysis(deps: GraphDeps, analysis_id: str | None, values: dict[str, Any]) -> None:
     if (key := _id(analysis_id)) is None:
         return
     try:
@@ -88,3 +87,20 @@ async def finish_analysis(
             await session.commit()
     except Exception as exc:  # noqa: BLE001
         logger.warning("could not finalise analysis", extra={"error": str(exc)})
+
+
+async def save_dashboard(
+    deps: GraphDeps, analysis_id: str | None, spec: DashboardSpec, generated_by: str
+) -> None:
+    if (key := _id(analysis_id)) is None:
+        return
+    try:
+        async with deps.sessionmaker() as session:
+            session.add(
+                Dashboard(
+                    analysis_id=key, spec=spec.model_dump(mode="json"), generated_by=generated_by
+                )
+            )
+            await session.commit()
+    except Exception as exc:  # noqa: BLE001 - the answer exists even if the dashboard row does not
+        logger.warning("could not record dashboard", extra={"error": str(exc)})

@@ -55,16 +55,20 @@ def after_execute(state: AnalysisState, *, max_attempts: int) -> ExecuteNext:
     return "analysis_agent" if last is not None and last.status == "succeeded" else "finalize"
 
 
-def after_analysis(state: AnalysisState) -> Literal["plan_drilldown", "finalize"]:
-    """Proposals go to the planner; anything else ends the run."""
+def after_analysis(state: AnalysisState) -> Literal["plan_drilldown", "visualization_agent"]:
+    """Proposals go to the planner; anything else is ready to be shown."""
     rounds = state.get("analysis_rounds") or []
     if rounds and rounds[-1].needs_drilldown and rounds[-1].drilldown is not None:
         return "plan_drilldown"
-    return "finalize"
+    return "visualization_agent"
 
 
-def after_plan(state: AnalysisState) -> Literal["retrieve_context", "finalize"]:
-    """A refused proposal ends the investigation; an approved one starts the next step."""
-    if state.get("stop_reason") or state.get("drill") is None:
-        return "finalize"
+def after_plan(state: AnalysisState) -> Literal["retrieve_context", "visualization_agent"]:
+    """An approved proposal starts the next step.
+
+    A refused one ends the investigation, but the levels already completed are real
+    results, so they still go to the dashboard rather than being thrown away.
+    """
+    if state.get("drill") is None:
+        return "visualization_agent"
     return "retrieve_context"

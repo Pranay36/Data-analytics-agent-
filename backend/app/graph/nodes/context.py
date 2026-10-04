@@ -85,7 +85,8 @@ async def load_context(state: AnalysisState, deps: GraphDeps) -> AnalysisState:
         },
         "dimensions": [
             DimensionInfo(
-                table=table.table_name, column=column.name,
+                table=table.table_name,
+                column=column.name,
                 sample_values=[str(v) for v in (column.sample_values or [])],
                 description=(column.description or None),
             )
@@ -172,8 +173,12 @@ async def _catalog_fallback(
         question=question,
         tables=[
             RetrievedChunk(
-                kind="table", title=draft.title, content=draft.content,
-                payload=draft.payload, score=0.0, reason="fallback",
+                kind="table",
+                title=draft.title,
+                content=draft.content,
+                payload=draft.payload,
+                score=0.0,
+                reason="fallback",
             )
             for draft in drafts[:FALLBACK_TABLES]
         ],
