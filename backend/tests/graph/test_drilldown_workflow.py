@@ -424,3 +424,55 @@ async def test_a_comparison_reply_without_periods_is_repaired_by_the_model(sourc
 
     assert result.state["frame"].current_period is not None
     assert "frame is required" in provider.requests[1].messages[-1].content
+
+
+async def test_a_flat_breakdown_leads_to_a_different_dimension_not_a_conclusion(source) -> None:
+    """The failure: one dimension showed no standout, so the investigation stopped.
+
+    No real dimension in this dataset is cleanly flat (mobile_app carries 54% of the
+    drop, card 44%), so the breakdown is built to be: the true totals split into four
+    equal parts. That keeps it reconciling with the overall figure while guaranteeing
+    that nothing dominates.
+    """
+    flat_sql = f"""
+    SELECT v.s AS segment,
+           SUM(total_amount) FILTER (WHERE {MAY}) / 4 AS previous_value,
+           SUM(total_amount) FILTER (WHERE {JUNE}) / 4 AS current_value
+    FROM orders CROSS JOIN (VALUES ('a'), ('b'), ('c'), ('d')) AS v(s)
+    WHERE status = 'SUCCESS' AND {BOTH} GROUP BY v.s"""
+
+    by_channel = analysis(
+        summary="Check channel.", needs_drilldown=True,
+        drilldown={"dimension": "orders.channel", "focus_value": None,
+                   "step_question": "How did revenue change by channel?", "rationale": "x"},
+    )
+    try_region = analysis(
+        summary="Nothing stood out by channel.", needs_drilldown=True,
+        drilldown={"dimension": "orders.shipping_region", "focus_value": "a",
+                   "step_question": "How did revenue change by region?", "rationale": "x"},
+    )
+    result, _ = await run(
+        source, headline(), by_channel, reply(sql=flat_sql), try_region,
+        reply(sql=REGION_SQL), analysis(summary="South explains it."),
+    )
+    steps = [q for q in result.state["queries"] if q.status == "succeeded"]
+
+    assert steps[1].profile["comparison"]["dominant_segment"] is None, "premise: flat"
+    assert result.state["drilldown_depth"] == 2
+    assert steps[2].dimension == "orders.shipping_region"
+    assert steps[2].filters == [], "the model's stray focus was dropped: nothing dominated"
+
+
+async def test_the_drill_step_is_told_the_figures_it_must_add_up_to(source) -> None:
+    """Stated before the attempt: in the evaluation a breakdown summed totals where the
+    headline used monthly averages, failed reconciliation three times, and left the
+    investigation stuck at the first level."""
+    _, provider = await run(
+        source, headline(), by_region(),
+        reply(sql=REGION_SQL), by_category_in_south(), reply(sql=CATEGORY_SQL), analysis(),
+    )
+    first_drill = provider.requests[2].messages[-1].content
+    second_drill = provider.requests[4].messages[-1].content
+
+    assert "TARGET" in first_drill and "21,665,720.50" in first_drill
+    assert "add up to South" in second_drill and "5,955,692.85" in second_drill

@@ -118,8 +118,15 @@ async def plan_drilldown(state: AnalysisState, deps: GraphDeps) -> AnalysisState
     # The model supplies the segment; the dimension that segment belongs to is whatever
     # the last breakdown was grouped by, which only the run knows. A headline figure has
     # no segments, so any focus the model offers there is meaningless and is dropped.
+    comparison = last_profile.comparison
+    no_dominant = bool(
+        comparison and len(comparison.segments) > 1 and comparison.dominant_segment is None
+    )
+
+    # When nothing dominated there is no segment worth focusing on, so any focus the model
+    # offers is dropped and the next step is simply another dimension for the whole figure.
     focus: dict[str, str] = {}
-    if drafted.focus_value and last.dimension and segments != ["total"]:
+    if drafted.focus_value and last.dimension and segments != ["total"] and not no_dominant:
         focus = {last.dimension: str(drafted.focus_value)}
 
     proposal = DrillDownRequest(
@@ -140,6 +147,7 @@ async def plan_drilldown(state: AnalysisState, deps: GraphDeps) -> AnalysisState
         dimensions=state.get("dimensions", []),
         last_segments=segments,
         last_was_headline=segments == ["total"],
+        last_had_no_dominant=no_dominant,
         reserve_calls=_reserve(deps),
     )
     verdict = check_drilldown(proposal, context)

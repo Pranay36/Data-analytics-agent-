@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 
 from app.agents.query_agent import QueryRequest, run_query_agent
+from app.analytics import ResultProfile
 from app.graph.deps import GraphDeps
 from app.graph.persistence import set_stage
+from app.graph.reconcile import expected_totals
 from app.graph.state import AnalysisState, RunError
 from app.llm import LLMUnavailable
 from app.llm.budget import BudgetExceeded
@@ -24,6 +26,18 @@ async def query_agent(state: AnalysisState, deps: GraphDeps) -> AnalysisState:
     repairing = bool(state.get("last_error"))
     previous = state.get("pending")
 
+    expected = None
+    drill = state.get("drill") if state["mode"] == "drilldown" else None
+    if drill is not None:
+        parent = next(
+            (q for q in reversed(state.get("queries", []))
+             if q.status == "succeeded" and q.profile),
+            None,
+        )
+        comparison = ResultProfile.model_validate(parent.profile).comparison if parent else None
+        if comparison is not None:
+            expected = expected_totals(comparison, drill.focus_filter or {})
+
     request = QueryRequest(
         question=state["current_question"],
         context=state["retrieved"],
@@ -35,6 +49,7 @@ async def query_agent(state: AnalysisState, deps: GraphDeps) -> AnalysisState:
         frame=state.get("frame") if state["mode"] == "drilldown" else None,
         drill=state.get("drill") if state["mode"] == "drilldown" else None,
         filters=list(state.get("filter_path", [])),
+        expected=expected,
     )
 
     try:

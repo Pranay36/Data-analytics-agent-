@@ -31,7 +31,7 @@ class Reconciliation:
     message: str = ""
 
 
-def _expected(
+def expected_totals(
     parent: ComparisonProfile, focus: dict[str, str]
 ) -> tuple[float, float, str] | None:
     """The previous/current totals a breakdown of `focus` should add up to."""
@@ -66,7 +66,7 @@ def reconcile(
     if child.comparison is None or parent.comparison is None:
         return Reconciliation(True)
 
-    expected = _expected(parent.comparison, focus)
+    expected = expected_totals(parent.comparison, focus)
     if expected is None:
         return Reconciliation(True)
     expected_previous, expected_current, label = expected
@@ -85,9 +85,10 @@ def reconcile(
             f"The breakdown does not add up to {label}. Its segments total "
             f"{actual_previous:,.2f} (previous) and {actual_current:,.2f} (current), but "
             f"{label} was {expected_previous:,.2f} and {expected_current:,.2f} in the "
-            "previous step. This usually means values are being counted more than once, "
-            "for example summing an order's total after joining to its line items. Use "
-            "the line-level amount for a breakdown that goes through line items "
-            "(see the BUSINESS DEFINITIONS), and keep the same filters and periods."
+            "previous step. Two common causes: values counted more than once (for example "
+            "summing an order's total after joining to its line items; use the line-level "
+            "amount instead), or a different scale (for example totals here where the "
+            "previous step used monthly averages; apply the same division). Keep the same "
+            "filters, periods and units."
         ),
     )

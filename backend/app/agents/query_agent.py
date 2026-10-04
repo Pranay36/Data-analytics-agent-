@@ -52,6 +52,8 @@ class QueryRequest:
     drill: DrillDownRequest | None = None
     filters: list[dict[str, str]] = field(default_factory=list)
     """Every segment restriction accumulated down the path, not just the latest."""
+    expected: tuple[float, float, str] | None = None
+    """(previous, current, label): what the breakdown must add up to."""
 
     @property
     def is_drilldown(self) -> bool:
@@ -129,6 +131,17 @@ def _drilldown_block(request: QueryRequest) -> str:
     else:
         filters = "- No restriction: break down the overall figure.\n"
 
+    target = ""
+    if request.expected is not None:
+        previous_total, current_total, label = request.expected
+        target = (
+            f"\nTARGET: the segments you return must add up to {label}: `previous_value` "
+            f"totals {previous_total:,.2f} and `current_value` totals {current_total:,.2f}, "
+            "within a few percent. Those are the figures from the previous step. Use the "
+            "same units and scale: if the previous step used monthly averages, divide the "
+            "same way here. A breakdown that does not add up is rejected.\n"
+        )
+
     return (
         "## THIS IS A DRILL-DOWN STEP\n"
         "Keep this consistent with the earlier queries: the same metric, the same "
@@ -145,6 +158,7 @@ def _drilldown_block(request: QueryRequest) -> str:
         "line-level equivalent given in the BUSINESS DEFINITIONS, with the same status "
         "filter and periods.\n"
         "\n"
+        f"{target}\n"
         "Return EXACTLY these columns, in this order: `segment` (the value of "
         f"{drill.dimension}), `previous_value`, `current_value`. "
         "Do NOT add an ORDER BY: the results are sorted for you. (Ordering by the "

@@ -68,6 +68,10 @@ class DrillContext:
     last_was_headline: bool = False
     """True when the last result was a single overall figure, with no segments yet.
     The first drill-down then breaks that total down, so it has nothing to focus on."""
+    last_had_no_dominant: bool = False
+    """True when the last breakdown had several segments and none stood out. There is
+    nothing to focus on, so the useful next move is a different dimension on the same
+    overall figure."""
     reserve_calls: int = 0
     """Held back for later steps, such as the dashboard."""
     extra: dict = field(default_factory=dict)
@@ -126,7 +130,7 @@ def check_drilldown(request: DrillDownRequest, ctx: DrillContext) -> Verdict:
         # return a single row and teach nothing.
         return Verdict(False, f"cannot break down by {request.dimension!r}: already filtered")
 
-    if not request.focus_filter and not ctx.last_was_headline:
+    if not request.focus_filter and not (ctx.last_was_headline or ctx.last_had_no_dominant):
         # After a breakdown there are segments to choose between; with none chosen
         # the follow-up would just repeat the same breakdown.
         return Verdict(False, "no segment was chosen to focus on")

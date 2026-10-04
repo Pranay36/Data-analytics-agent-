@@ -31,9 +31,12 @@ metric, not a similarly named column that means something else.
   example "South"), and `dimension` is a different dimension that might explain why it
   changed.
 - Never drill into a segment that moved the opposite way to the overall change.
-- If the statistics say no segment dominates ("the change is spread across
-  segments"), STOP: set needs_drilldown to false and say plainly that the change is
-  broad-based, with confidence "medium". Do not force a conclusion.
+- If the statistics say no segment dominates, that only tells you about THIS dimension.
+  Do not conclude the change is broad-based from a single dimension. If fewer than two
+  dimensions have been examined for the overall figure, propose a DIFFERENT dimension
+  with an EMPTY `focus_value`. Stop only once two dimensions have shown nothing, then say
+  plainly that the change is spread out, with confidence "medium". Do not force a
+  conclusion either way.
 - If the breakdown is already as detailed as is useful, stop and summarise.
 
 When you do drill down:

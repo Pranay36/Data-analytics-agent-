@@ -177,3 +177,21 @@ def test_no_sequence_of_requests_can_exceed_the_depth_limit() -> None:
             used.append(dim.name)
 
     assert depth == 3, "it must reach the cap, and never pass it"
+
+
+# ── A flat breakdown on one dimension says nothing about the others ──────────
+def test_after_a_breakdown_with_no_dominant_segment_another_dimension_needs_no_focus() -> None:
+    """Found by evaluation: refunds broken down by reason showed no standout, and the
+    investigation concluded 'broad-based' without ever trying product category, where the
+    driver was. There is nothing to focus on, so an empty focus must be allowed."""
+    flat = context(last_had_no_dominant=True)
+    assert check_drilldown(request(focus_filter={}), flat).approved
+
+
+def test_an_empty_focus_is_still_refused_when_a_segment_did_stand_out() -> None:
+    assert not check_drilldown(request(focus_filter={}), context()).approved
+
+
+def test_trying_the_same_dimension_again_is_still_refused() -> None:
+    flat = context(last_had_no_dominant=True, used_dimensions=["products.category"])
+    assert not check_drilldown(request(focus_filter={}), flat).approved

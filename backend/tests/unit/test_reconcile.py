@@ -77,3 +77,31 @@ def test_unfamiliar_shapes_pass_rather_than_fail() -> None:
     table = profile_result(["category", "revenue"], [["a", 1.0]])
     assert reconcile(table, REGIONS, {"orders.shipping_region": "South"}).ok
     assert reconcile(REGIONS, table, {}).ok
+
+
+# ── The target is stated before the attempt, not only diagnosed after it ─────
+def test_the_expected_totals_for_a_focused_segment() -> None:
+    from app.graph.reconcile import expected_totals
+
+    previous, current, label = expected_totals(
+        REGIONS.comparison, {"orders.shipping_region": "South"}
+    )
+    assert (previous, current, label) == (5_955_692.85, 3_856_503.45, "South")
+
+
+def test_the_expected_totals_without_a_focus_are_the_overall_figures() -> None:
+    from app.graph.reconcile import expected_totals
+
+    previous, current, label = expected_totals(REGIONS.comparison, {})
+    assert previous == pytest.approx(21_665_720.50) and label == "the overall total"
+
+
+def test_a_scale_mismatch_is_described_in_the_failure_message() -> None:
+    """Seen live: the headline used monthly averages and the breakdowns summed totals, so
+    three attempts failed. The message talked only about double counting."""
+    headline = profile_result(["previous_value", "current_value"], [[618_956.0, 1_082_318.0]])
+    totals = profile([["A", 1_000_000, 1_700_000], ["B", 1_475_824, 1_648_636]])
+    verdict = reconcile(totals, headline, {})
+
+    assert not verdict.ok
+    assert "monthly averages" in verdict.message
