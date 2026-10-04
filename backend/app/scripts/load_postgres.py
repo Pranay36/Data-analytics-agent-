@@ -34,6 +34,13 @@ READONLY_USER = "insightflow_ro"
 READONLY_PASSWORD = "insightflow_ro"  # local demo only; override in any real deployment
 
 
+def already_loaded(url: str) -> bool:
+    """True if the demo orders are already there: a restarted stack must not reload them."""
+    with psycopg.connect(url) as conn:
+        exists = conn.execute("SELECT to_regclass('public.orders') IS NOT NULL").fetchone()[0]  # type: ignore[index]
+        return bool(exists and conn.execute("SELECT count(*) FROM orders").fetchone()[0])  # type: ignore[index]
+
+
 def load(url: str, readonly_password: str) -> None:
     missing = [name for name in TABLES if not (CSV_DIR / f"{name}.csv").exists()]
     if missing:
@@ -95,11 +102,19 @@ def main() -> None:
         help="Target database URL (defaults to DEMO_ANALYTICS_URL).",
     )
     parser.add_argument("--readonly-password", default=READONLY_PASSWORD)
+    parser.add_argument(
+        "--if-empty",
+        action="store_true",
+        help="do nothing if the data is already loaded (safe to run on every start)",
+    )
     args = parser.parse_args()
 
     if not args.url:
         sys.exit("No target database. Set DEMO_ANALYTICS_URL in .env or pass --url.")
 
+    if args.if_empty and already_loaded(args.url):
+        print("Demo data already loaded; nothing to do.")
+        return
     load(args.url, args.readonly_password)
 
 

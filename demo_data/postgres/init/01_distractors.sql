@@ -12,6 +12,17 @@
 -- Retrieval that cannot separate `orders` from `orders_legacy` would quietly
 -- answer every revenue question from stale 2023 data.
 
+-- The read-only role the agent connects as. Created here as well as by load_postgres so that
+-- the GRANT at the bottom of this file works on a brand-new database, where this script runs
+-- before anything else has had the chance to create it. The password is for the local demo
+-- only; any real deployment overrides it.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'insightflow_ro') THEN
+        CREATE ROLE insightflow_ro LOGIN PASSWORD 'insightflow_ro';
+    END IF;
+END $$;
+
 DROP TABLE IF EXISTS campaign_spend, marketing_campaigns, support_tickets,
     inventory_snapshots, web_sessions, order_events, orders_legacy, suppliers CASCADE;
 

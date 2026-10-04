@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch makes an older run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (lint + tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # The same two databases as docker-compose: one for the app's own data (with pgvector), one
+    # for the demo warehouse the agent queries.
+    services:
+      appdb:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: insightflow
+          POSTGRES_USER: insightflow
+          POSTGRES_PASSWORD: insightflow
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U insightflow -d insightflow"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      demo:
+        image: postgres:16
+        env:
+          POSTGRES_DB: shopsphere
+          POSTGRES_USER: shopsphere
+          POSTGRES_PASSWORD: shopsphere
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U shopsphere -d shopsphere"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://insightflow:insightflow@localhost:5432/insightflow
+      DEMO_ANALYTICS_URL: postgresql://shopsphere:shopsphere@localhost:5433/shopsphere
+      # No model or embedding keys: the tests script their models, so CI never spends quota.
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - run: uv sync --frozen
+
+      # Throwaway keys, made fresh each run so no secret is stored in the repository.
+      - name: Generate test secrets
+        run: |
+          echo "AUTH_SECRET_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "DATASOURCE_ENCRYPTION_KEY=$(uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> "$GITHUB_ENV"
+
+      - name: Lint
+        run: uv run ruff check app tests
+
+      - name: Prepare databases
+        run: |
+          psql "postgresql://insightflow:insightflow@localhost:5432/insightflow" \
+            -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector"
+          uv run alembic upgrade head
+          uv run python -m app.scripts.generate_demo_data
+          uv run python -m app.scripts.load_postgres
+          psql "$DEMO_ANALYTICS_URL" -v ON_ERROR_STOP=1 -f ../demo_data/postgres/init/01_distractors.sql
+
+      - name: Test
+        run: uv run pytest -q -m "not live_llm"
+
+  frontend:
+    name: Frontend (lint + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+
+  # Catches a Dockerfile or compose file that has quietly stopped working. Builds only: nothing
+  # is pushed anywhere.
+  docker:
+    name: Docker images
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Validate compose file
+        run: docker compose --profile app config -q
+
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: false
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: Build web image
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: false
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max

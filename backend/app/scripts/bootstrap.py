@@ -66,7 +66,12 @@ async def main() -> None:
         }
 
         if POSTGRES_NAME in existing:
-            await service.sync_data_source(session, existing[POSTGRES_NAME].id)
+            # The stored host depends on where this last ran: "localhost" from a laptop,
+            # "demo-analytics" from inside the compose network. Converge it, or a stack
+            # started against an older database would keep pointing at the wrong place.
+            pg = existing[POSTGRES_NAME]
+            pg.config = {**pg.config, **_postgres_config()[0]}
+            await service.sync_data_source(session, pg.id)
             print(f"re-synced   {POSTGRES_NAME}")
         else:
             config, password = _postgres_config()
@@ -77,7 +82,15 @@ async def main() -> None:
             print(f"registered  {POSTGRES_NAME}  ({source.id})")
 
         if CSV_NAME in existing:
-            await service.sync_data_source(session, existing[CSV_NAME].id)
+            csv_source = existing[CSV_NAME]
+            target = settings.upload_dir / "demo" / "shopsphere.duckdb"
+            if csv_source.config.get("path") != str(target):
+                # Same reason as above: the file lives at a different path in a container.
+                if not target.exists() and (CSV_DIR / "orders.csv").exists():
+                    build_duckdb_from_csvs([CSV_DIR / f"{n}.csv" for n in DEMO_TABLES], target)
+                if target.exists():
+                    csv_source.config = {**csv_source.config, "path": str(target)}
+            await service.sync_data_source(session, csv_source.id)
             print(f"re-synced   {CSV_NAME}")
         elif (CSV_DIR / "orders.csv").exists():
             target = settings.upload_dir / "demo" / "shopsphere.duckdb"

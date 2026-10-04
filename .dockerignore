@@ -1,0 +1,24 @@
+# Keep the build context small and keep secrets out of images.
+.git
+.github
+.env
+.env.*
+!.env.example
+
+**/__pycache__
+**/*.pyc
+.venv
+backend/.venv
+backend/.llm_cache
+backend/.embedding_cache
+backend/.pytest_cache
+backend/.ruff_cache
+backend/tests
+
+frontend
+data
+reports
+plans
+demo_data/generated/*
+!demo_data/generated/ground_truth.json
+*.duckdb

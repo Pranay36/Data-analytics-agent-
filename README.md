@@ -88,6 +88,49 @@ curl localhost:8000/api/v1/datasources
 
 ---
 
+## Run everything with Docker
+
+One command starts the databases, loads the demo data and serves the app:
+
+```bash
+cp .env.example .env     # then set AUTH_SECRET_KEY, DATASOURCE_ENCRYPTION_KEY and GEMINI_API_KEY
+docker compose --profile app up --build
+```
+
+Then open **http://localhost:3000** and create an account. The API is on `localhost:8000`.
+
+What starts, in order:
+
+| Service | Does |
+|---|---|
+| `appdb`, `demo-analytics` | the two Postgres servers (the app's own data, and the demo warehouse it queries) |
+| `seed` | one-shot: migrate, generate and load the demo data, register the data sources, build the retrieval index. Safe to repeat |
+| `api` | FastAPI on :8000. Waits for `seed` to finish |
+| `web` | the Next.js app on :3000. Waits for `api` to be healthy |
+
+Secrets come from `.env` at run time and are never copied into an image. Without a
+`GEMINI_API_KEY` the stack still comes up, but the index is skipped, so questions will not
+retrieve any context until you set it and re-run `docker compose --profile app run --rm seed`.
+
+Plain `docker compose up -d` (no profile) starts only the two databases, which is what you want
+when running the API and web app from source as described above.
+
+Two settings matter once this is deployed: `PUBLIC_API_URL` is the address the *browser* uses to
+reach the API (it is built into the web image), and `WEB_ORIGIN` is the web app's address, which the
+API allows through CORS.
+
+## Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request:
+
+- **Backend:** lint, then the full test suite against real Postgres (pgvector and the demo
+  warehouse as service containers). It uses no model keys, so it never spends free-tier quota.
+- **Frontend:** lint and a production build.
+- **Docker:** validates the compose file and builds both images, so a broken Dockerfile is
+  caught before anyone tries to deploy it. Nothing is pushed.
+
+---
+
 ## Asking a question
 
 ```bash

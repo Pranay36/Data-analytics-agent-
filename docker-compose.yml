@@ -7,6 +7,31 @@
 #
 # They are separate servers with separate credentials, exactly as in production,
 # where the first becomes a managed Postgres and the second is a customer's own.
+#
+# Two ways to run it:
+#   docker compose up -d                       just the databases; run the API and web
+#                                              yourself with `uv run` and `npm run dev`
+#   docker compose --profile app up --build    the whole stack: databases, a one-shot seed
+#                                              job, the API on :8000 and the web app on :3000
+#
+# Secrets (AUTH_SECRET_KEY, DATASOURCE_ENCRYPTION_KEY, LLM keys) come from .env and are never
+# written into an image. Inside the network the databases are reached by service name, so the
+# connection strings below override whatever .env says for local development.
+
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql+asyncpg://insightflow:insightflow@appdb:5432/insightflow
+  DEMO_ANALYTICS_URL: postgresql://shopsphere:shopsphere@demo-analytics:5432/shopsphere
+  UPLOAD_DIR: /data/uploads
+  CORS_ORIGINS: ${WEB_ORIGIN:-http://localhost:3000}
+  # The caches exist to save quota while iterating on prompts; a deployed instance wants fresh answers.
+  LLM_CACHE_ENABLED: "false"
+  EMBEDDING_CACHE_ENABLED: "false"
+
+x-backend-common: &backend-common
+  env_file:
+    - path: .env
+      required: false
+  environment: *backend-env
 
 services:
   appdb:
@@ -45,6 +70,54 @@ services:
       timeout: 5s
       retries: 10
 
+  # One-shot: migrate, generate and load demo data, register sources, index knowledge.
+  # Re-runnable; the API waits for it to finish.
+  seed:
+    <<: *backend-common
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["sh", "docker/seed.sh"]
+    depends_on:
+      appdb: {condition: service_healthy}
+      demo-analytics: {condition: service_healthy}
+    volumes:
+      - uploads:/data/uploads
+    restart: "no"
+
+  api:
+    <<: *backend-common
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    depends_on:
+      seed: {condition: service_completed_successfully}
+    ports:
+      - "8000:8000"
+    volumes:
+      - uploads:/data/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  web:
+    profiles: ["app"]
+    build:
+      context: ./frontend
+      args:
+        # What the *browser* uses to reach the API, so not the in-network name.
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8000}
+    depends_on:
+      api: {condition: service_healthy}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
   # ClickHouse — added in sprint block for Phase 13. Start with:
   #   docker compose --profile clickhouse up -d
   clickhouse:
@@ -66,6 +139,7 @@ services:
       retries: 20
 
 volumes:
+  uploads:
   appdb_data:
   demo_analytics_data:
   clickhouse_data:
