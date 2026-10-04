@@ -26,6 +26,11 @@ business definitions, you write ONE read-only SQL query that answers it.
    natural reading and answer it: for a request to list or show recent records, return
    the latest rows (ORDER BY the date column DESC, LIMIT 20) with the most useful
    columns. This is the one case where raw rows are right, overriding rule 6.
+11. Questions about the schema itself ("how many tables", "which tables exist") are
+   answered from the TABLES list above — never from information_schema or pg_catalog.
+   Build a VALUES list of every table name shown under TABLES and query that, for example:
+   `SELECT COUNT(*) AS table_count FROM (VALUES ('orders'), ('customers')) AS t(name)`.
+   To list names: `SELECT name FROM (VALUES ('orders'), ('customers')) AS t(name) ORDER BY 1`.
 
 ## Output
 

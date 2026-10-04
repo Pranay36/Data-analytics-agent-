@@ -19,7 +19,7 @@ from sqlalchemy import select
 from app.connectors.csv_import import build_duckdb_from_csvs
 from app.core.config import get_settings
 from app.core.crypto import CryptoError, encrypt_secret
-from app.db.models import DataSource
+from app.db.models import CatalogTable, DataSource
 from app.db.session import get_engine, get_sessionmaker
 from app.services import datasource_service as service
 
@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 REPO_DIR = Path(__file__).resolve().parents[3]
 CSV_DIR = REPO_DIR / "demo_data" / "generated"
 DEMO_TABLES = ["customers", "products", "orders", "order_items", "payments", "refunds"]
+BUSINESS_TABLES = frozenset(DEMO_TABLES)
 BUSINESS_CONTEXT = {"as_of_date": "2026-06-30", "currency": "INR"}
 
 POSTGRES_NAME = "ShopSphere (Postgres)"
@@ -37,16 +38,29 @@ CSV_NAME = "ShopSphere (CSV)"
 def _postgres_config() -> tuple[dict, str]:
     """Connect as the read-only role, never the owner that loaded the data."""
     url = urlparse(get_settings().demo_analytics_url)
-    return (
-        {
-            "host": url.hostname or "localhost",
-            "port": url.port or 5432,
-            "database": url.path.lstrip("/"),
-            "username": "insightflow_ro",
-            "schemas": ["public"],
-        },
-        "insightflow_ro",
-    )
+    config: dict = {
+        "host": url.hostname or "localhost",
+        "port": url.port or 5432,
+        "database": url.path.lstrip("/"),
+        "username": "insightflow_ro",
+        "schemas": ["public"],
+    }
+    # Remote hosts (Aiven, RDS, …) need TLS; local docker-compose does not.
+    if config["host"] not in ("localhost", "127.0.0.1", "demo-analytics", "appdb"):
+        config["sslmode"] = "require"
+    return config, "insightflow_ro"
+
+
+async def _mark_business_tables_only(session, source_id) -> None:
+    """When the app DB and demo warehouse share one database, sync sees both.
+
+    Hide InsightFlow's own metadata tables so the agent only queries business data.
+    """
+    tables = (
+        await session.scalars(select(CatalogTable).where(CatalogTable.data_source_id == source_id))
+    ).all()
+    for table in tables:
+        table.is_queryable = table.table_name in BUSINESS_TABLES
 
 
 async def main() -> None:
@@ -65,20 +79,22 @@ async def main() -> None:
             for s in (await session.scalars(select(DataSource))).all()
         }
 
+        pg_config, pg_password = _postgres_config()
         if POSTGRES_NAME in existing:
             # The stored host depends on where this last ran: "localhost" from a laptop,
             # "demo-analytics" from inside the compose network. Converge it, or a stack
             # started against an older database would keep pointing at the wrong place.
             pg = existing[POSTGRES_NAME]
-            pg.config = {**pg.config, **_postgres_config()[0]}
+            pg.config = {**pg.config, **pg_config}
             await service.sync_data_source(session, pg.id)
+            await _mark_business_tables_only(session, pg.id)
             print(f"re-synced   {POSTGRES_NAME}")
         else:
-            config, password = _postgres_config()
             source = await service.create_data_source(
                 session, name=POSTGRES_NAME, source_type="postgres",
-                config=config, password=password, business_context=BUSINESS_CONTEXT,
+                config=pg_config, password=pg_password, business_context=BUSINESS_CONTEXT,
             )
+            await _mark_business_tables_only(session, source.id)
             print(f"registered  {POSTGRES_NAME}  ({source.id})")
 
         if CSV_NAME in existing:
