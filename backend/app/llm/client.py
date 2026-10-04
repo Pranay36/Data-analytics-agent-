@@ -82,6 +82,7 @@ DEFAULT_BACKOFF_SECONDS = 2.0
 # its latency) on every single run.
 COOLDOWN_GONE_SECONDS = 15 * 60  # model withdrawn, or credentials rejected
 COOLDOWN_BUSY_SECONDS = 60  # retries exhausted on a rate limit, timeout or 5xx
+COOLDOWN_INVALID_SECONDS = 10 * 60  # repeatedly returned unusable structured output
 
 
 class StructuredResult[T: BaseModel](BaseModel):
@@ -114,6 +115,8 @@ class LLMClient:
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         clock: Callable[[], float] = time.monotonic,
         max_retry_wait_seconds: float = MAX_RETRY_WAIT_SECONDS,
+        max_strategies_per_model: int = 2,
+        invalid_strikes: int = 3,
     ) -> None:
         if not chain:
             raise ValueError("The LLM fallback chain is empty. Set LLM_FALLBACK_CHAIN.")
@@ -127,6 +130,9 @@ class LLMClient:
         self._sleep = sleep
         self._max_retry_wait = max_retry_wait_seconds
         self._clock = clock
+        self._max_strategies = max(1, max_strategies_per_model)
+        self._invalid_strikes = max(1, invalid_strikes)
+        self._strikes: dict[str, int] = {}
         self._cooling_until: dict[str, float] = {}
         # Free tiers have low per-minute limits; cap in-flight calls.
         self._semaphore = asyncio.Semaphore(max_concurrency)
@@ -157,6 +163,8 @@ class LLMClient:
             max_concurrency=settings.llm_max_concurrency,
             timeout_seconds=settings.llm_timeout_seconds,
             max_retry_wait_seconds=settings.llm_max_retry_wait_seconds,
+            max_strategies_per_model=settings.llm_max_strategies_per_model,
+            invalid_strikes=settings.llm_invalid_strikes,
         )
 
     # ── Public API ───────────────────────────────────────────────────────────
@@ -203,7 +211,8 @@ class LLMClient:
                 failures.append(f"{entry.key}: skipped, unavailable for another {remaining}s")
                 continue
 
-            for strategy in strategies_for(entry):
+            invalid_here = False
+            for strategy in strategies_for(entry)[: self._max_strategies]:
                 context = _Attempt(
                     agent=agent, entry=entry, index=index, provider=provider, strategy=strategy,
                     spec=StructuredSpec(
@@ -213,11 +222,14 @@ class LLMClient:
                     temperature=temperature, max_tokens=max_tokens, budget=budget,
                 )
                 try:
-                    return await self._run(context, messages, schema)
+                    result = await self._run(context, messages, schema)
+                    self._strikes.pop(entry.key, None)
+                    return result
                 except BudgetExceeded:
                     raise
                 except (BadRequest, OutputInvalid) as exc:
                     # This strategy failed here; another may work on the same model.
+                    invalid_here = invalid_here or isinstance(exc, OutputInvalid)
                     failures.append(f"{entry.key} [{strategy}]: {_message(exc)}")
                     continue
                 except ProviderError as exc:
@@ -225,12 +237,26 @@ class LLMClient:
                     failures.append(f"{entry.key}: {_message(exc)}")
                     self._start_cooldown(entry, exc)
                     break
+            else:
+                if invalid_here:
+                    self._record_strike(entry)
 
         raise LLMUnavailable(failures)
 
     # ── Internals ────────────────────────────────────────────────────────────
     def _is_cooling(self, entry: ChainEntry) -> bool:
         return self._cooling_until.get(entry.key, 0.0) > self._clock()
+
+    def _record_strike(self, entry: ChainEntry) -> None:
+        """A model that cannot produce valid output is skipped after a few requests.
+
+        Without this a run pays for the same bad model at every step.
+        """
+        strikes = self._strikes.get(entry.key, 0) + 1
+        self._strikes[entry.key] = strikes
+        if strikes >= self._invalid_strikes:
+            self._strikes.pop(entry.key)
+            self._cooling_until[entry.key] = self._clock() + COOLDOWN_INVALID_SECONDS
 
     def _start_cooldown(self, entry: ChainEntry, exc: ProviderError) -> None:
         gone = isinstance(exc, ModelUnavailable | ProviderAuthError)

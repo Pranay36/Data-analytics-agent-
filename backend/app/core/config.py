@@ -80,6 +80,13 @@ class Settings(BaseSettings):
     """The longest rate-limit wait worth sitting through before moving to the next
     model. Free tiers ask for waits of about 20s; a worse model is usually slower."""
     llm_max_concurrency: int = 2
+    llm_max_strategies_per_model: int = 2
+    """How many output strategies (tool call, JSON schema, prompt JSON) to try on one
+    model for one request. Each costs up to two provider calls, so trying all three on a
+    model that returns garbage burns six free-tier requests to learn nothing new."""
+    llm_invalid_strikes: int = 3
+    """Requests in a row a model may fail to produce valid output before it is skipped
+    for `COOLDOWN_INVALID_SECONDS`. A success resets the count."""
     """Semaphore width. Free tiers have low per-minute limits."""
 
     # ── Quota protection (see PROJECT_PLAN §17.6.1) ──────────────────────────

@@ -380,3 +380,41 @@ async def test_cooldown_reasons_appear_in_the_failure_report() -> None:
 
     with pytest.raises(LLMUnavailable):
         await ask(client)
+
+
+# ── Limits on free-tier spend ────────────────────────────────────────────────
+async def test_strategies_tried_on_one_model_are_capped() -> None:
+    """A model returning garbage must not cost a call per strategy per repair."""
+    bad = FakeLLMProvider(["garbage"] * 10, name="bad")
+    client = make_client(bad, max_strategies_per_model=1)
+
+    with pytest.raises(LLMUnavailable):
+        await ask(client)
+    assert len(bad.requests) == 2  # the request and one repair, for one strategy only
+
+
+async def test_a_model_that_keeps_returning_garbage_is_skipped_for_a_while() -> None:
+    bad = FakeLLMProvider(["garbage"] * 20, name="bad")
+    good = FakeLLMProvider([GOOD] * 5, name="good")
+    clock = Clock()
+    client = make_client(bad, good, clock=clock, max_strategies_per_model=1, invalid_strikes=2)
+
+    await ask(client)
+    await ask(client)  # second strike: now cooling down
+    calls_before = len(bad.requests)
+    await ask(client)
+
+    assert len(bad.requests) == calls_before
+    clock.now += 11 * 60
+    await ask(client)
+    assert len(bad.requests) > calls_before  # tried again once the cooldown passed
+
+
+async def test_a_valid_reply_clears_a_models_strikes() -> None:
+    flaky = FakeLLMProvider(["x", "x", GOOD, "x", "x", GOOD], name="flaky")
+    fallback = FakeLLMProvider([GOOD] * 5, name="fallback")
+    client = make_client(flaky, fallback, max_strategies_per_model=1, invalid_strikes=2)
+
+    for _ in range(4):
+        await ask(client)
+    assert len(flaky.requests) == 6  # never skipped: each success reset the count
