@@ -1,0 +1,17 @@
+# One site, named by API_HOST. Caddy obtains the HTTPS certificate on its own: ports 80 and 443
+# must be reachable from the internet for that.
+{$API_HOST} {
+	encode zstd gzip
+
+	# Only the API and its health check are exposed. Interactive docs, the OpenAPI schema and
+	# everything else are not.
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+	handle /health {
+		reverse_proxy api:8000
+	}
+	handle {
+		respond "Not found" 404
+	}
+}

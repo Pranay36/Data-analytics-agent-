@@ -1,0 +1,156 @@
+name: Deploy backend
+
+# Runs after CI succeeds on main, or by hand from the Actions tab.
+#
+#   1. build the API image and push it to GitHub's container registry (ghcr.io)
+#   2. copy the compose file and Caddyfile to the EC2 machine
+#   3. pull the new image there and restart the stack
+#   4. check the public HTTPS address; if it is not healthy, put the previous version back
+#
+# The machine's secrets (database passwords, API keys) live in /opt/insightflow/deploy/.env on
+# the server itself. They are never in this repository or in the image.
+#
+# One-time setup: deploy/README.md.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# Never two deploys at once, and never cancel one half way through.
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  deploy:
+    name: Build, push and deploy
+    # CI must have passed, unless this was started by hand.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Gives you a place to require approval before a deploy, if you want one (repo Settings).
+    environment: production
+
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      EC2_USER: ${{ secrets.EC2_USER }}
+      API_HOST: ${{ secrets.API_HOST }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+
+      # Registry names must be lower case; the repository owner may not be.
+      - name: Work out the image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/api" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ env.SHA }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: Set up SSH
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Trusts the host key seen now. Fine for a portfolio project; for stricter setups,
+          # store the server's known_hosts line as a secret and use that instead.
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+          {
+            echo "Host target"
+            echo "  HostName $EC2_HOST"
+            echo "  User $EC2_USER"
+            echo "  IdentityFile ~/.ssh/deploy_key"
+            echo "  ServerAliveInterval 30"
+          } > ~/.ssh/config
+
+      - name: Copy the deploy files
+        run: |
+          tar czf - \
+              deploy/docker-compose.prod.yml \
+              deploy/Caddyfile \
+              demo_data/appdb/init \
+              demo_data/postgres/init \
+            | ssh target "mkdir -p /opt/insightflow && tar xzf - -C /opt/insightflow"
+
+      # The token goes in on stdin, so it never appears in a process list on the server.
+      - name: Let the server pull from the registry
+        run: |
+          printf '%s\n' "${{ secrets.GITHUB_TOKEN }}" \
+            | ssh target "docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
+
+      - name: Deploy
+        run: |
+          ssh target "IMAGE_TAG='${IMAGE}:${SHA}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd /opt/insightflow/deploy
+          test -f .env || { echo "Missing /opt/insightflow/deploy/.env (see deploy/README.md)"; exit 1; }
+
+          export API_IMAGE="$IMAGE_TAG"
+          docker compose -f docker-compose.prod.yml pull
+          docker compose -f docker-compose.prod.yml up -d --remove-orphans
+          REMOTE
+
+      # Tests the whole public path: DNS, HTTPS certificate, Caddy, the API, and that
+      # protected routes really do refuse an anonymous caller.
+      - name: Check it is healthy
+        id: health
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS --max-time 10 "https://${API_HOST}/health" >/dev/null 2>&1; then
+              echo "healthy after $attempt attempt(s)"
+              code=$(curl -s -o /dev/null -w '%{http_code}' "https://${API_HOST}/api/v1/analyses")
+              [ "$code" = "401" ] || { echo "expected 401 from a protected route, got $code"; exit 1; }
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "not healthy after 5 minutes"
+          exit 1
+
+      # The previous image is still on the machine, so putting it back is quick.
+      - name: Roll back if the new version is not healthy
+        if: failure() && steps.health.outcome == 'failure'
+        run: |
+          ssh target "bash -s" <<'REMOTE' || true
+          cd /opt/insightflow/deploy
+          docker compose -f docker-compose.prod.yml logs --tail 60 api seed || true
+          previous=$(cat .last_good_image 2>/dev/null || true)
+          if [ -n "$previous" ]; then
+            echo "rolling back to $previous"
+            API_IMAGE="$previous" docker compose -f docker-compose.prod.yml up -d --remove-orphans
+          else
+            echo "no previous version recorded; leaving things as they are"
+          fi
+          REMOTE
+
+      - name: Remember this version as the last good one
+        run: |
+          ssh target "echo '${IMAGE}:${SHA}' > /opt/insightflow/deploy/.last_good_image && docker image prune -f >/dev/null"

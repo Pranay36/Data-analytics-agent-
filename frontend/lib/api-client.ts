@@ -8,8 +8,16 @@ import type {
   Schema,
 } from "@/types/api";
 
-/** Inlined at build time, so set it where the frontend is built, not where it runs. */
-export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
+/**
+ * Where the browser sends API calls. Inlined at build time.
+ *
+ * Empty means "this same site": in production the Next.js server forwards /api/v1 to the real
+ * backend (see `rewrites` in next.config.ts), so the browser never leaves its own origin. Set it
+ * to a full URL to call a backend directly, as the Docker compose stack does.
+ */
+export const API_URL = (
+  process.env.NEXT_PUBLIC_API_URL ?? (process.env.NODE_ENV === "production" ? "" : "http://localhost:8000")
+).replace(/\/$/, "");
 const BASE = `${API_URL}/api/v1`;
 
 export class ApiError extends Error {
@@ -84,7 +92,7 @@ async function request<T>(path: string, init?: RequestInit, retried = false): Pr
     response = await fetch(`${BASE}${path}`, { ...init, headers, credentials: "include" });
   } catch {
     // The server is down or unreachable: say so, rather than surfacing "Failed to fetch".
-    throw new ApiError(0, `Cannot reach the server at ${API_URL}. Is the backend running?`);
+    throw new ApiError(0, `Cannot reach the server${API_URL ? ` at ${API_URL}` : ""}. Is the backend running?`);
   }
 
   if (response.status === 401 && !retried && !NO_REFRESH.includes(path)) {

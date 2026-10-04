@@ -1,0 +1,111 @@
+# Production stack for one EC2 machine.
+#
+#   Browser -> Vercel (HTTPS) -> /api/v1/* forwarded here -> Caddy (HTTPS) -> api -> databases
+#
+# Differences from the development docker-compose.yml, all deliberate:
+#   - no database port is published: the databases are reachable only from inside this network
+#   - only Caddy listens on the machine (80 and 443), and it only forwards /api/* and /health
+#   - passwords and keys are required, not defaulted: compose refuses to start without them
+#   - the API image is pulled from a registry (built by CI), not built on this small machine
+#
+# Settings come from a `.env` file next to this one; see .env.prod.example.
+
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql+asyncpg://insightflow:${APPDB_PASSWORD:?set APPDB_PASSWORD}@appdb:5432/insightflow
+  DEMO_ANALYTICS_URL: postgresql://shopsphere:${DEMO_PASSWORD:?set DEMO_PASSWORD}@demo-analytics:5432/shopsphere
+  UPLOAD_DIR: /data/uploads
+  CORS_ORIGINS: ${WEB_ORIGIN:?set WEB_ORIGIN}
+  APP_ENV: demo               # JSON logs
+  DEMO_MODE: ${DEMO_MODE:-true}   # public: no connecting your own database
+  AUTH_COOKIE_SECURE: "true"
+  AUTH_COOKIE_SAMESITE: lax
+  LLM_CACHE_ENABLED: "false"
+  EMBEDDING_CACHE_ENABLED: "false"
+
+x-backend: &backend
+  image: ${API_IMAGE:?set API_IMAGE}
+  env_file: .env
+  environment: *backend-env
+
+services:
+  appdb:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: insightflow
+      POSTGRES_USER: insightflow
+      POSTGRES_PASSWORD: ${APPDB_PASSWORD:?set APPDB_PASSWORD}
+    volumes:
+      - appdb_data:/var/lib/postgresql/data
+      - ../demo_data/appdb/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U insightflow -d insightflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  demo-analytics:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: shopsphere
+      POSTGRES_USER: shopsphere
+      POSTGRES_PASSWORD: ${DEMO_PASSWORD:?set DEMO_PASSWORD}
+    volumes:
+      - demo_analytics_data:/var/lib/postgresql/data
+      - ../demo_data/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shopsphere -d shopsphere"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Runs on every deploy: migrate, load demo data (once), register sources, index. Safe to repeat.
+  seed:
+    <<: *backend
+    command: ["sh", "docker/seed.sh"]
+    depends_on:
+      appdb: {condition: service_healthy}
+      demo-analytics: {condition: service_healthy}
+    volumes:
+      - uploads:/data/uploads
+    restart: "no"
+
+  api:
+    <<: *backend
+    # "*" because the only thing that can reach this container is Caddy, over the private network.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000",
+              "--proxy-headers", "--forwarded-allow-ips", "*"]
+    depends_on:
+      seed: {condition: service_completed_successfully}
+    volumes:
+      - uploads:/data/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # HTTPS in front of the API. Gets and renews a real certificate for API_HOST by itself.
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      API_HOST: ${API_HOST:?set API_HOST}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api: {condition: service_healthy}
+
+volumes:
+  appdb_data:
+  demo_analytics_data:
+  uploads:
+  caddy_data:
+  caddy_config:

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import ActiveUser, get_active_user
 from app.connectors import ConnectionFailed, ConnectionTestResult, ConnectorError
+from app.core.config import get_settings
 from app.core.crypto import CryptoError
 from app.db.models import DataSource, TableRelationship
 from app.db.session import get_session
@@ -28,6 +29,20 @@ from app.services import datasource_service as service
 router = APIRouter(
     prefix="/datasources", tags=["datasources"], dependencies=[Depends(get_active_user)]
 )
+
+
+def custom_connections_allowed() -> None:
+    """In a public demo, nobody may point the server at a host of their choosing.
+
+    Without this, any account could make the deployment open connections to arbitrary
+    addresses, including the database containers on its own private network.
+    """
+    if get_settings().demo_mode:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Connecting your own database is turned off in this demo. "
+            "Upload a CSV file or use the sample data.",
+        )
 
 
 def _out(source: DataSource, table_count: int = 0) -> DataSourceOut:
@@ -49,14 +64,21 @@ def _secret(value) -> str | None:
     return value.get_secret_value() if value else None
 
 
-@router.post("/test", response_model=ConnectionTestResult)
+@router.post(
+    "/test", response_model=ConnectionTestResult, dependencies=[Depends(custom_connections_allowed)]
+)
 async def test_connection(body: ConnectionTestRequest) -> ConnectionTestResult:
     return await service.test_connection(
         body.type, body.config.model_dump(), _secret(body.password)
     )
 
 
-@router.post("", response_model=DataSourceOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=DataSourceOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(custom_connections_allowed)],
+)
 async def create_data_source(
     body: DataSourceCreate, user: ActiveUser, session: AsyncSession = Depends(get_session)
 ) -> DataSourceOut:

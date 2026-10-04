@@ -1,291 +1,237 @@
 # InsightFlow
 
-Ask a business question in plain English, get a dashboard back.
+**Ask a business question in plain English. Get a dashboard, and the reasoning behind it.**
 
-InsightFlow connects to PostgreSQL, ClickHouse or an uploaded CSV, understands a question like
-*"Why did revenue fall in June?"*, writes safe SQL, investigates the cause on its own, and
-returns KPIs, charts and a written explanation.
+InsightFlow is an agentic analytics platform. You connect a PostgreSQL database or upload a
+CSV, ask something like *"Why did revenue fall in June?"*, and it writes safe SQL, investigates
+the cause on its own, and returns KPIs, charts and a written explanation — with every query it
+ran visible underneath.
 
-> 🚧 **Early development.** The backend foundation is in place; the agent pipeline is being
-> built. Full design: [`plans/PROJECT_PLAN.md`](plans/PROJECT_PLAN.md).
+It is not a chatbot. The output is a dashboard, and every number in it traces back to SQL you
+can read.
+
+```
+Q: "Why did revenue fall in June 2026 compared with May?"
+
+  Revenue fell 11.4% (-₹2,474,435)
+    → South region fell 35.2% and accounts for 85% of the drop
+    → within South, Electronics fell 57.2% — 80% of the total decline
+    → within Electronics, no single channel dominates
+
+  4 queries run · 3 model calls · dashboard with 3 KPIs, 2 charts, 4 insights
+```
 
 ---
 
-## Setup
+## What it can do
 
-**Requirements:** Docker and [uv](https://docs.astral.sh/uv/).
+**Ask anything, in your own words**
+Questions are matched against your schema *and* your business definitions, so "turnover",
+"GMV" and "sales" all reach the same metric — and the SQL applies the rules that definition
+states, like excluding cancelled orders.
 
-**1. Clone and configure**
+**Investigates on its own**
+For a "why" question it does not stop at the headline number. It breaks the change down by
+region, then by category, then deeper — choosing each next step from computed contribution
+shares, up to a hard depth and budget limit. The whole path is shown.
+
+**Writes SQL that cannot hurt you**
+Every generated query is parsed into a syntax tree and checked before it runs: single
+statement only, no writes anywhere in the tree, table allow-list, forced row limit, no
+functions that reach outside the database. Behind that sits a read-only database role and a
+statement timeout.
+
+**Shows its work**
+Every run records the SQL it tried (including rejected attempts), what retrieval gave the
+model, how many model calls it cost, and why it stopped. A wrong answer can be traced to its
+cause instead of guessed at.
+
+**Knows when it cannot answer**
+If the data cannot support the question, it says so and explains what is missing, rather than
+inventing a plausible join.
+
+**Multi-user, with real limits**
+Email sign-in with JWT and rotating refresh tokens. Each account sees only its own analyses
+and data sources, and has a daily ceiling on analyses, model calls and tokens.
+
+**Measured, not vibe-checked**
+A 33-case evaluation suite with computed ground truth scores correctness, SQL structure,
+investigation path, correct refusals and whether every number in the summary actually appears
+in the data. No model grades another model.
+
+**Costs nothing to run**
+Works entirely on free LLM tiers (Groq, Gemini, OpenRouter) with an automatic fallback chain
+when a provider is rate-limited or returns unusable output.
+
+---
+
+## How it works
+
+```
+Question
+   │
+   ├─ Retrieval ........ schema + business definitions + verified example queries (pgvector)
+   ├─ Query Agent ...... writes SQL                                           [LLM]
+   ├─ SQL Guard ........ parses, validates, rewrites, or rejects         [deterministic]
+   ├─ Execute .......... read-only role, row cap, statement timeout
+   ├─ Profiler ......... computes the arithmetic: deltas, shares, dominance [deterministic]
+   ├─ Analysis Agent ... interprets the facts, proposes a drill-down            [LLM]
+   │      └── loop back, bounded by depth / call budget / reconciliation checks
+   └─ Visualisation .... dashboard spec, validated against real columns         [LLM]
+                            └── falls back to a rule-built dashboard if invalid
+```
+
+The division is the point: **models choose, code computes and enforces.** Percentages,
+contribution shares and "which segment dominates" are calculated in Python, not by the model,
+because models are unreliable at arithmetic. Depth limits, budgets and SQL safety are
+enforced in code, because a prompt is a request and not a guarantee.
+
+---
+
+## Tech stack
+
+| | |
+|---|---|
+| **Backend** | Python 3.12, FastAPI, LangGraph, SQLAlchemy 2 (async), Alembic, Pydantic v2 |
+| **Data** | PostgreSQL 16, pgvector (HNSW), DuckDB (CSV), sqlglot |
+| **AI** | Groq, Gemini, OpenRouter — structured output with fallback chain; RAG with 1024-dim embeddings |
+| **Frontend** | Next.js 16, React 19, TypeScript, Tailwind v4, TanStack Query, Recharts |
+| **Auth** | JWT (PyJWT), Argon2id, rotating refresh tokens with reuse detection |
+| **Infra** | Docker Compose, GitHub Actions CI, Caddy (HTTPS) |
+
+---
+
+## Quick start
+
+**Requirements:** Docker, and a free [Gemini API key](https://aistudio.google.com/apikey)
+(for embeddings) plus a free [Groq key](https://console.groq.com/keys).
 
 ```bash
-git clone git@github.com:Pranay36/Data-analytics-agent-.git
+git clone https://github.com/Pranay36/Data-analytics-agent-.git
 cd Data-analytics-agent-
 cp .env.example .env
 ```
 
-Generate an encryption key and paste it after `DATASOURCE_ENCRYPTION_KEY=` in `.env`:
+Fill in three values in `.env`:
 
 ```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Signs login tokens
+openssl rand -hex 32
+# Encrypts saved database passwords
+python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-**2. Start the databases**
-
-```bash
-docker compose up -d
+```ini
+AUTH_SECRET_KEY=<the first one>
+DATASOURCE_ENCRYPTION_KEY=<the second one>
+GEMINI_API_KEY=<your key>
+GROQ_API_KEY=<your key>
 ```
 
-This starts two Postgres servers — `appdb` on port 5432 (our own metadata, with pgvector) and
-`demo-analytics` on 5433 (the sample business data we query).
-
-**3. Install dependencies**
+Then start everything:
 
 ```bash
-cd backend
-uv sync
-```
-
-**4. Generate and load the demo dataset**
-
-```bash
-uv run python -m app.scripts.generate_demo_data   # synthetic ShopSphere data
-uv run python -m app.scripts.load_postgres        # load it, create a read-only role
-```
-
-This creates ~25k orders across 12 months with deliberately planted patterns — a
-June revenue drop concentrated in one region and category, a refund spike, and a
-share of orders that never complete. The true answers are written to
-`demo_data/generated/ground_truth.json`, which is what makes evaluation objective.
-
-**5. Create the schema and register the demo sources**
-
-```bash
-uv run alembic upgrade head                 # create our own tables
-uv run python -m app.scripts.bootstrap      # register + sync the demo data sources
-```
-
-This needs `DATASOURCE_ENCRYPTION_KEY` set in `.env` (see step 1). Saved database passwords
-are encrypted with it, so keep it — a changed key makes stored credentials unreadable.
-
-**6. Run**
-
-```bash
-uv run uvicorn app.main:app --reload
-```
-
-**7. Verify**
-
-```bash
-curl localhost:8000/health         # {"status":"ok"}
-curl localhost:8000/health/ready   # {"status":"ready","checks":{"database":"ok"}}
-```
-
-API docs: `localhost:8000/docs`
-
-```bash
-curl localhost:8000/api/v1/datasources
-```
-
----
-
-## Run everything with Docker
-
-One command starts the databases, loads the demo data and serves the app:
-
-```bash
-cp .env.example .env     # then set AUTH_SECRET_KEY, DATASOURCE_ENCRYPTION_KEY and GEMINI_API_KEY
 docker compose --profile app up --build
 ```
 
-Then open **http://localhost:3000** and create an account. The API is on `localhost:8000`.
+Open **http://localhost:3000**, create an account, and ask a question. The sample
+ShopSphere dataset — 25,000 orders with deliberately planted patterns — is loaded and indexed
+automatically on first start.
 
-What starts, in order:
-
-| Service | Does |
-|---|---|
-| `appdb`, `demo-analytics` | the two Postgres servers (the app's own data, and the demo warehouse it queries) |
-| `seed` | one-shot: migrate, generate and load the demo data, register the data sources, build the retrieval index. Safe to repeat |
-| `api` | FastAPI on :8000. Waits for `seed` to finish |
-| `web` | the Next.js app on :3000. Waits for `api` to be healthy |
-
-Secrets come from `.env` at run time and are never copied into an image. Without a
-`GEMINI_API_KEY` the stack still comes up, but the index is skipped, so questions will not
-retrieve any context until you set it and re-run `docker compose --profile app run --rm seed`.
-
-Plain `docker compose up -d` (no profile) starts only the two databases, which is what you want
-when running the API and web app from source as described above.
-
-Two settings matter once this is deployed: `PUBLIC_API_URL` is the address the *browser* uses to
-reach the API (it is built into the web image), and `WEB_ORIGIN` is the web app's address, which the
-API allows through CORS.
-
-## Continuous integration
-
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request:
-
-- **Backend:** lint, then the full test suite against real Postgres (pgvector and the demo
-  warehouse as service containers). It uses no model keys, so it never spends free-tier quota.
-- **Frontend:** lint and a production build.
-- **Docker:** validates the compose file and builds both images, so a broken Dockerfile is
-  caught before anyone tries to deploy it. Nothing is pushed.
-
----
-
-## Asking a question
+<details>
+<summary><b>Running from source instead</b> (for development)</summary>
 
 ```bash
-uv run python -m app.scripts.index_knowledge     # once: embed schema and definitions
-uv run python -m app.scripts.ask "What was total revenue in June 2026?"
+docker compose up -d                 # just the two databases
+
+cd backend
+uv sync
+uv run alembic upgrade head
+uv run python -m app.scripts.generate_demo_data
+uv run python -m app.scripts.load_postgres
+uv run python -m app.scripts.bootstrap
+uv run python -m app.scripts.index_knowledge
+uv run uvicorn app.main:app --reload
+
+# in another terminal
+cd frontend && npm install && npm run dev
 ```
 
-Prints what retrieval supplied, every query the model attempted (including ones the
-SQL guard rejected), the analysis at each level, and the result.
-
-For a "why" question it investigates on its own:
+Ask from the command line without the UI:
 
 ```bash
 uv run python -m app.scripts.ask "Why did revenue fall in June 2026 compared with May?"
 ```
 
-```
-total        revenue fell 11.4%
-  → region   South fell 35.2% and accounts for 85% of the drop
-  → category within South: Electronics fell 57.2%, 80% of South's change
-  → channel  within Electronics: no single channel dominates
-```
-
-Depth, model-call budget and token budget are all capped in code. The model proposes
-each next step and deterministic code decides whether to run it.
-
-## Evaluation
-
-A suite of questions with computed ground truth measures how often the system is right,
-rather than relying on spot checks:
-
-```bash
-uv run python -m app.evaluation                      # full run: live model calls
-uv run python -m app.evaluation --retrieval-only     # retrieval alone: free, seconds
-uv run python -m app.evaluation --category business_rule
-```
-
-Each case has a gold SQL query that is run against the live database, so "correct" is a
-computation, not an opinion. Results are compared on values, not column names, so
-`SUM(x) AS revenue` and `SUM(x) AS total` are the same answer. Beyond the final number it
-checks the SQL's syntax tree (was revenue filtered to successful orders? was the decoy
-archive table avoided?), the investigation path, correct refusals, that a destructive
-request changes nothing, and that every number in the written summary appears in the
-data. No model grades another model: every check is code.
-
-A report is written to `reports/` and each run is stored with the configuration that
-produced it.
-
-## API
-
-Starting an analysis returns immediately; the run continues in the background and writes
-its progress to the database, so a client polls and a page refresh loses nothing.
-
-```bash
-curl -X POST localhost:8000/api/v1/analyses -H 'content-type: application/json' \
-  -d '{"datasource_id": "<id>", "question": "Why did revenue fall in June 2026?"}'
-# 202 {"id": "...", "status": "queued"}
-
-curl localhost:8000/api/v1/analyses/<id>
-# {"status": "running", "stage": "analyzing", ...}  ->  {"status": "completed", "dashboard": {...}}
-```
-
-| Endpoint | Purpose |
-|---|---|
-| `POST /api/v1/analyses` | start a run (202) |
-| `GET /api/v1/analyses/{id}` | progress, then the result, steps taken and dashboard |
-| `GET /api/v1/analyses` | history, newest first |
-| `POST /api/v1/datasources/csv` | create a source from uploaded CSV files |
-| `GET /api/v1/datasources/{id}/examples` | suggested questions |
-
-Interactive docs: `localhost:8000/docs`.
-
-## Choosing models
-
-Models and providers live in [`backend/models.yaml`](backend/models.yaml) — which
-providers exist, the LLM fallback chain, which structured-output modes each model
-supports, and the embedding model with its vector width. Edit that file to switch
-models; no code changes.
-
-```yaml
-llm:
-  chain:
-    - groq:openai/gpt-oss-120b
-    - openrouter:nvidia/nemotron-3-super-120b-a12b:free
-
-embeddings:
-  default: openrouter:liquid/lfm-2.5-embedding-350m:free
-```
-
-Work is split by how scarce each free tier is. OpenRouter allows 50 requests a day
-across chat and embeddings combined — one re-index plus one evaluation run exhausts
-it — so chat runs on Groq (1,000/day), embeddings on Gemini (a separate allowance),
-and OpenRouter stays as a fallback.
-
-When a provider does refuse a request, that is tracked and reported by
-`GET /health/ready`, including when the allowance returns:
-
-```json
-{"rate_limits": {"openrouter": "rate limited (3x), resets in 4h"}}
-```
-
-Environment variables override the file, so a deployment needs no edit:
-
-```bash
-LLM_FALLBACK_CHAIN=groq:openai/gpt-oss-120b,openrouter:qwen/qwen3.8-27b:free
-EMBEDDING_MODEL=gemini:text-embedding-004
-LLM_MODEL_QUERY=groq:openai/gpt-oss-120b     # per-agent override
-```
-
-Changing the embedding model to one of a different width needs a migration and a
-re-index, since vectors from different models are not comparable. The app refuses
-to start on a mismatch rather than failing later mid-index.
-
-Free models are withdrawn without notice, so check what currently works:
-
-```bash
-uv run python -m app.scripts.check_models           # one real question, end to end
-uv run python -m app.scripts.check_models --probe   # every model x strategy
-uv run python -m app.evaluation --retrieval-only    # retrieval quality, no model calls
-```
-
-LLM responses and embeddings are both cached on disk, so repeating a question costs
-no quota.
-
-## Development
-
-```bash
-cd backend
-uv run pytest          # tests
-uv run ruff check .    # lint
-```
-
-Stop the databases with `docker compose down`. Data survives; add `-v` to wipe it.
+</details>
 
 ---
 
-## Safety
+## The sample dataset
 
-Generated SQL is parsed into a syntax tree and inspected before it reaches a database.
-Text-matching is not enough — all three of these read as harmless to a prefix check:
+`ShopSphere` is generated from a fixed seed, so it is identical every time, and its true
+answers are computed from the data rather than written by hand — which is what makes the
+evaluation objective. Three patterns are planted in it:
 
-```sql
-SELECT 1; DROP TABLE orders                              -- starts with SELECT
-WITH x AS (DELETE FROM orders RETURNING *) SELECT * FROM x   -- starts with WITH
-SELECT * FROM (SELECT id FROM orders LIMIT 5) t          -- "has a LIMIT"
+| Pattern | What it tests |
+|---|---|
+| June revenue falls 11.4%, concentrated in South → Electronics | whether the investigation finds a cause two levels down |
+| Home & Kitchen refund rate jumps from 3% to 15.7% | whether a rate is computed against the right denominator |
+| 7.6% of orders never complete (₹20M difference) | whether the business rule "revenue excludes failed orders" is applied |
+
+It also includes deliberate distractors — a deprecated `orders_legacy` archive with identical
+columns, and tables whose names suggest relevance they do not have.
+
+---
+
+## Testing and evaluation
+
+```bash
+cd backend
+uv run pytest                                  # 567 tests, no API keys needed
+uv run python -m app.evaluation                # full suite (uses live model calls)
+uv run python -m app.evaluation --retrieval-only   # retrieval accuracy, free and fast
 ```
 
-The guard rejects the first as two statements, the second for containing a `DELETE`
-anywhere in the tree, and caps the third — whose inner limit leaves the outer query
-unbounded. It also blocks functions that escape the database (`pg_sleep`, `read_csv`,
-ClickHouse's `url` and `remote`), enforces a table allowlist, and rewrites the outer
-`LIMIT`.
+The evaluation suite runs each case's gold SQL against the live database and compares
+**values**, not column names — so two differently-written queries that produce the same answer
+both pass. Beyond the final number it checks the SQL's syntax tree (was revenue filtered to
+successful orders? was the decoy table avoided?), the investigation path, correct refusals,
+that a destructive request changes nothing, and that every number in the written summary
+appears in the data.
 
-Behind it: a read-only database role, a server-side statement timeout, and a row cap.
+Last full-suite run: **25 of 28 cases (89%)**. The suite is small and was written knowing the
+system's weak spots, so treat that as a development signal, not a benchmark claim.
 
-## Stack
+---
 
-Python 3.12 · FastAPI · LangGraph · PostgreSQL + pgvector · sqlglot · DuckDB · Next.js
+## Configuration
+
+Models are configuration, not code — free-tier availability changes weekly.
+[`backend/models.yaml`](backend/models.yaml) holds the providers, the fallback chain, which
+structured-output modes each model supports, and the embedding model with its vector width.
+Environment variables override it, so a deployment needs no file edit:
+
+```bash
+LLM_FALLBACK_CHAIN=groq:openai/gpt-oss-120b,openrouter:qwen/qwen3.8-27b:free
+LLM_MODEL_ANALYSIS=gemini:gemini-flash-lite-latest   # per-agent override
+QUOTA_TOKENS_PER_DAY=1000000                         # per-account daily ceiling
+DEMO_MODE=true                                       # public demo: no custom DB connections
+```
+
+---
+
+## Project status
+
+Working end to end locally and in Docker: ask a question, get a dashboard, with accounts and
+usage limits. Deployment files (EC2 + Vercel) are written but **not yet deployed**.
+
+| Next | |
+|---|---|
+| Deploy | EC2 backend behind Caddy, frontend on Vercel |
+| ClickHouse connector | the connector interface and SQL-guard dialect policy are already in place for it |
+| Hybrid retrieval | add a keyword arm alongside the vector one |
+| Investigation quality | same-length period baselines, parallel dimension decomposition |
+
+Design documents: [`plans/PROJECT_PLAN.md`](plans/PROJECT_PLAN.md) ·
+[`plans/AUTH_AND_USAGE.md`](plans/AUTH_AND_USAGE.md)
