@@ -237,6 +237,7 @@ usage limits. Deployment files (EC2 + Vercel) are written but **not yet deployed
 
 | | |
 |---|---|
+| [docs/HANDOFF.md](docs/HANDOFF.md) | Current state, decisions, and what is left to do |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How it all works, in plain language with diagrams |
 | [docs/CHALLENGES.md](docs/CHALLENGES.md) | Real problems hit while building, and how they were solved |
 | [docs/INTERVIEW_PREP.md](docs/INTERVIEW_PREP.md) | Questions and answers about the design |
