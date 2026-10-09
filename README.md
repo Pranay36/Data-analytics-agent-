@@ -233,5 +233,13 @@ usage limits. Deployment files (EC2 + Vercel) are written but **not yet deployed
 | Hybrid retrieval | add a keyword arm alongside the vector one |
 | Investigation quality | same-length period baselines, parallel dimension decomposition |
 
+## Documentation
+
+| | |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How it all works, in plain language with diagrams |
+| [docs/CHALLENGES.md](docs/CHALLENGES.md) | Real problems hit while building, and how they were solved |
+| [docs/INTERVIEW_PREP.md](docs/INTERVIEW_PREP.md) | Questions and answers about the design |
+
 Design documents: [`plans/PROJECT_PLAN.md`](plans/PROJECT_PLAN.md) ·
 [`plans/AUTH_AND_USAGE.md`](plans/AUTH_AND_USAGE.md)
