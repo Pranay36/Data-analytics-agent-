@@ -37,8 +37,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await _reconcile_interrupted_runs()
     await _ensure_accounts()
 
+    from app.jobs.db_keepalive import setup_db_keepalive, shutdown_db_keepalive
+
+    keepalive = setup_db_keepalive(settings)
+
     yield
 
+    shutdown_db_keepalive(keepalive)
     logger.info("shutting down InsightFlow")
 
 

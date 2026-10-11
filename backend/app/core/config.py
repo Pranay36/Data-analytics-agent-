@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     demo_analytics_url: str = ""
     """Seeded 'customer' analytical DB used by the demo datasource (analytical plane)."""
 
+    db_keepalive_enabled: bool = False
+    db_keepalive_interval_minutes: int = 30
+    db_keepalive_queries: Annotated[list[str], NoDecode] = [
+        "SELECT 1",
+        "SELECT NOW()",
+        "SELECT COUNT(*) FROM users",
+        "SELECT COUNT(*) FROM orders",
+    ]
+
     # ── Storage ──────────────────────────────────────────────────────────────
     upload_dir: Path = REPO_DIR / "data" / "uploads"
     max_upload_mb: int = 20
@@ -177,6 +186,13 @@ class Settings(BaseSettings):
         """Accept comma-separated strings from .env for list-typed settings."""
         if isinstance(v, str):
             return [item.strip() for item in v.split(",") if item.strip()]
+        return v
+
+    @field_validator("db_keepalive_queries", mode="before")
+    @classmethod
+    def _split_keepalive_queries(cls, v: object) -> object:
+        if isinstance(v, str):
+            return [item.strip() for item in v.split("|") if item.strip()]
         return v
 
     @property
